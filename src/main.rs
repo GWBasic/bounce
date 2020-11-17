@@ -1,10 +1,12 @@
 mod bridge;
 mod client;
+mod keys;
 mod server;
 
 use std::env::{args, var};
 
 use client::run_client;
+use keys::generate_keys;
 use server::run_server;
 
 #[async_std::main]
@@ -30,6 +32,9 @@ async fn main_env(mode: String) {
             let destination_host = get_server_from_env("BOUNCE_DESTINATION_HOST");
 
             run_client(bounce_server, destination_host).await;
+        },
+        Mode::Keys => {
+            generate_keys();
         }
     }
 }
@@ -63,6 +68,9 @@ async fn main_args() {
             let destination_host = args[3].clone();
         
             run_client(bounce_server, destination_host).await;
+        },
+        Mode::Keys => {
+            generate_keys();
         }
     }
 }
@@ -90,7 +98,8 @@ fn get_server_from_env(var_name: &str) -> String {
 
 enum Mode {
     Server,
-    Client
+    Client,
+    Keys
 }
 
 fn parse_mode(mode: &String) -> Mode {
@@ -98,6 +107,8 @@ fn parse_mode(mode: &String) -> Mode {
         Mode::Server
     } else if mode == "client" {
         Mode::Client
+    } else if mode == "keys" {
+        Mode::Keys
     } else {
         panic!("Unknown mode: {}", mode);
     }

@@ -1,0 +1,52 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'bounce'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=bounce",
+                    "--package=bounce"
+                ],
+                "filter": {
+                    "name": "bounce",
+                    "kind": "bin"
+                }
+            },
+            "args": ["client", "localhost:3457", "localhost:3000"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "BOUNCE_MODE": "keys",
+                "_PORT": "3456",
+                "_ADAPTER_PORT": "3457",
+                "_BOUNCE_SERVER": "localhost:3456",
+                "_BOUNCE_DESTINATION_HOST": "localhost:3457",
+            }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'bounce'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=bounce",
+                    "--package=bounce"
+                ],
+                "filter": {
+                    "name": "bounce",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
