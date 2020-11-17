@@ -19,10 +19,10 @@
                     "kind": "bin"
                 }
             },
-            "args": ["client", "localhost:3457", "localhost:3000"],
+            "args": ["client", "localhost:3457", "localhost:3000", "2Zr5TSYgy15Gx31MyO8ijw=="],
             "cwd": "${workspaceFolder}",
             "env": {
-                "BOUNCE_MODE": "keys",
+                "_BOUNCE_MODE": "server",
                 "_PORT": "3456",
                 "_ADAPTER_PORT": "3457",
                 "_BOUNCE_SERVER": "localhost:3456",

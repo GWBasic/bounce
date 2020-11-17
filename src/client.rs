@@ -3,7 +3,7 @@ use async_std::prelude::*;
 
 use crate::bridge::bridge;
 
-pub async fn run_client(bounce_server: String, destination_host: String) {
+pub async fn run_client(bounce_server: String, destination_host: String, _key: [u8; 16]) {
     println!("Bounce client: Connecting to bounce server at {}, bouncing to {}", bounce_server, destination_host);
 
     'client_loop: loop {

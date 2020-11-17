@@ -3,7 +3,7 @@ use async_std::prelude::*;
 
 use crate::bridge::bridge;
 
-pub async fn run_server(port: u16, adapter_port: u16) {
+pub async fn run_server(port: u16, adapter_port: u16, _key: [u8; 16]) {
 
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(socket_addr).await.unwrap();
