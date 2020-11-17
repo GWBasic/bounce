@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn parse_key_test_128() {
-        let key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+        let key = vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
         let key_str = key.to_base64(STANDARD);
 
         let parsed_key = parse_key(&key_str);
@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn parse_key_test_192() {
-        let key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26];
+        let key = vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26];
         let key_str = key.to_base64(STANDARD);
 
         let parsed_key = parse_key(&key_str);
@@ -88,7 +88,7 @@ mod tests {
 
     #[test]
     fn parse_key_test_256() {
-        let key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+        let key = vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
         let key_str = key.to_base64(STANDARD);
 
         let parsed_key = parse_key(&key_str);
