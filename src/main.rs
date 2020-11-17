@@ -6,7 +6,7 @@ mod server;
 use std::env::{args, var};
 
 use client::run_client;
-use keys::{generate_keys, parse_key};
+use keys::{Key, generate_keys, parse_key};
 use server::run_server;
 
 #[async_std::main]
@@ -36,7 +36,8 @@ async fn main_env(mode: String) {
             run_client(bounce_server, destination_host, key).await;
         },
         Mode::Keys => {
-            generate_keys();
+            let length = get_usize_from_env("BOUNCE_KEY_LENGTH");
+            generate_keys(length);
         }
     }
 }
@@ -74,7 +75,13 @@ async fn main_args() {
             run_client(bounce_server, destination_host, key).await;
         },
         Mode::Keys => {
-            generate_keys();
+            if args.len() != 3 {
+                panic!("Please specify the key size as command-line arguments:\n\t bounce keys [key size]");
+            }
+
+            let length = parse_usize(&args[2]);
+
+            generate_keys(length);
         }
     }
 }
@@ -86,14 +93,14 @@ fn get_port_from_env(var_name: &str) -> u16 {
     }
 }
 
-fn parse_port(port_string: &str) -> u16 {
-    match port_string.parse::<u16>() {
+fn parse_port(port_str: &str) -> u16 {
+    match port_str.parse::<u16>() {
         Ok(port) => port,
-        Err(err) => panic!("Invalid port \"{}\": {}", port_string, err)
+        Err(err) => panic!("Invalid port \"{}\": {}", port_str, err)
     }
 }
 
-fn get_key_from_env(var_name: &str) -> [u8; 16] {
+fn get_key_from_env(var_name: &str) -> Key {
     match var(var_name) {
         Ok(key_str) => parse_key(&key_str),
         Err(_) => panic!("{} must be set", var_name)
@@ -104,6 +111,20 @@ fn get_server_from_env(var_name: &str) -> String {
     match var(var_name) {
         Ok(server) => server,
         Err(_) => panic!("{} must be set", var_name)
+    }
+}
+
+fn get_usize_from_env(var_name: &str) -> usize {
+    match var(var_name) {
+        Ok(size_str) => parse_usize(&size_str),
+        Err(_) => panic!("{} must be set", var_name)
+    }
+}
+
+fn parse_usize(size_str: &str) -> usize {
+    match size_str.parse::<usize>() {
+        Ok(size) => size,
+        Err(err) => panic!("Invalid size \"{}\": {}", size_str, err)
     }
 }
 

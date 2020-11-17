@@ -2,8 +2,9 @@ use async_std::net::TcpStream;
 use async_std::prelude::*;
 
 use crate::bridge::bridge;
+use crate::keys::Key;
 
-pub async fn run_client(bounce_server: String, destination_host: String, _key: [u8; 16]) {
+pub async fn run_client(bounce_server: String, destination_host: String, _key: Key) {
     println!("Bounce client: Connecting to bounce server at {}, bouncing to {}", bounce_server, destination_host);
 
     'client_loop: loop {
