@@ -1,12 +1,11 @@
 extern crate rand;
 
-//use std::convert::TryInto;
-
 use crypto::aes::KeySize;
 use rand::RngCore;
 use rand::rngs::OsRng;
 use rustc_serialize::base64::{FromBase64, STANDARD, ToBase64};
 
+#[derive(Clone)]
 pub struct Key {
     pub key: Vec<u8>,
     pub size: KeySize
@@ -32,22 +31,6 @@ pub fn parse_key(key_str: &str) -> Key {
     let size = get_key_size(key.len() * 8);
 
     Key {key, size}
-
-    /*
-
-    if key_vec.len() != 16 {
-        panic!("Expected key length of 16, actual key length: {}", key_vec.len())
-    }
-
-    // https://stackoverflow.com/a/29570662/1711103
-    let key_slice = key_vec.into_boxed_slice();
-
-    let key: Box<[u8; 16]> = match key_slice.try_into() {
-        Err(_) => panic!("Can not convert key vector to array"),
-        Ok(k) => k,
-    };
-
-    *key*/
 }
 
 pub fn get_key_size(size_bits: usize) -> KeySize {
@@ -63,8 +46,17 @@ pub fn get_key_size(size_bits: usize) -> KeySize {
 mod tests {
     use super::*;
 
-    //use rustc_serialize::base64::{STANDARD, ToBase64};
     use rustc_serialize::base64::STANDARD;
+
+    // https://stackoverflow.com/a/25577080/1711103
+    macro_rules! matches(
+        ($expected:pat, $actual:expr) => (
+            match $actual {
+                $expected => (),
+                _ => panic!("Unexpected value")
+            }
+        )
+    );
 
     #[test]
     fn parse_key_test_128() {
@@ -73,17 +65,17 @@ mod tests {
 
         let parsed_key = parse_key(&key_str);
         assert_eq!(key, parsed_key.key);
-        //assert_eq!(KeySize::KeySize128, parsed_key.size);
+        matches!(KeySize::KeySize128, parsed_key.size);
     }
 
     #[test]
     fn parse_key_test_192() {
-        let key = vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26];
+        let key = vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
         let key_str = key.to_base64(STANDARD);
 
         let parsed_key = parse_key(&key_str);
         assert_eq!(key, parsed_key.key);
-        //assert_eq!(KeySize::KeySize192, parsed_key.size);
+        matches!(KeySize::KeySize192, parsed_key.size);
     }
 
     #[test]
@@ -93,6 +85,6 @@ mod tests {
 
         let parsed_key = parse_key(&key_str);
         assert_eq!(key, parsed_key.key);
-        //assert_eq!(KeySize::KeySize256, parsed_key.size);
+        matches!(KeySize::KeySize256, parsed_key.size);
     }
 }

@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 async-std = { version = "1.7.0", features = ["attributes"] }
-rust-crypto = "0.2.36"
+futures = "0.3.8"
 rand = "0.7.3"
+rust-crypto = "0.2.36"
 rustc-serialize = "0.3.24"
