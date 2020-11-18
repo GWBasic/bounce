@@ -1,10 +1,11 @@
 use async_std::net::{IpAddr, Ipv4Addr, TcpListener, SocketAddr};
 use async_std::prelude::*;
 
+use crate::auth::authenticate;
 use crate::bridge::bridge;
 use crate::keys::Key;
 
-pub async fn run_server(port: u16, adapter_port: u16, _key: Key) {
+pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
 
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(socket_addr).await.unwrap();
@@ -30,7 +31,13 @@ pub async fn run_server(port: u16, adapter_port: u16, _key: Key) {
 
                 println!("Incoming adapter stream");
 
-                // TODO: Authentication
+                match authenticate(key.clone(), adapter_stream.clone()).await {
+                    Err(err) => {
+                        println!("Bad client: {}", err);
+                        continue 'adapter_accept;
+                    },
+                    _ => {}
+                };
 
                 let stream;
                 

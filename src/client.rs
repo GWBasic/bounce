@@ -1,10 +1,11 @@
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 
+use crate::auth::authenticate;
 use crate::bridge::bridge;
 use crate::keys::Key;
 
-pub async fn run_client(bounce_server: String, destination_host: String, _key: Key) {
+pub async fn run_client(bounce_server: String, destination_host: String, key: Key) {
     println!("Bounce client: Connecting to bounce server at {}, bouncing to {}", bounce_server, destination_host);
 
     'client_loop: loop {
@@ -15,7 +16,12 @@ pub async fn run_client(bounce_server: String, destination_host: String, _key: K
             },
             Ok(mut bounce_stream) => {
 
-                // TODO: Authentication
+                match authenticate(key.clone(), bounce_stream.clone()).await {
+                    Err(err) => {
+                        panic!("Can not connect to server: {}", err);
+                    },
+                    _ => {}
+                };
 
                 let mut buf: [u8; 9] = [0; 9];
                 let mut read = 0;

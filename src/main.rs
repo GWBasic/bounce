@@ -1,3 +1,4 @@
+mod auth;
 mod bridge;
 mod client;
 mod keys;
