@@ -114,88 +114,97 @@ async fn read_buffer(mut stream: &TcpStream, buffer: &mut [u8], timeout: Duratio
     }
 }
 
-async fn write_buffer(mut stream: TcpStream, buffer: &[u8]) -> Result<(), Error> {
-    stream.write_all(buffer).await
+async fn write_buffer(mut stream: TcpStream, buffer: Vec<u8>) -> Result<(), Error> {
+    stream.write_all(&buffer).await
 }
 
-async fn authenticate(_key: Key, adapter_stream: TcpStream) -> Result<(), Error> {
+async fn read_and_write(stream: &TcpStream, buffer_to_write: &Vec<u8>, timeout: Duration) -> Result<Vec<u8>, Error> {
 
-    // Read and write "bounce"
-    let write_future = task::spawn(write_buffer(adapter_stream.clone(), b"bounce"));
+    let write_future = task::spawn(write_buffer(stream.clone(), buffer_to_write.clone()));
 
-    let mut bounce_buffer = [0u8; b"bounce".len()];
-    // TODO: Timeout
-    match read_buffer(&adapter_stream, &mut bounce_buffer, Duration::from_secs_f32(0.5)).await {
+    let mut buffer_to_read = vec![0u8; buffer_to_write.len()];
+
+    match read_buffer(&stream, &mut buffer_to_read, timeout).await {
         Err(err) => return Err(err),
         Ok(_) => {}
     };
-
-    if bounce_buffer[..] != b"bounce"[..] {
-        return Err(Error::new(ErrorKind::InvalidData, "This is not a bounce server or client"));
-    }
 
     match write_future.await {
         Err(err) => return Err(err),
-        Ok(()) => {}
+        Ok(()) => Ok(buffer_to_read)
+    }
+}
+
+fn process(key: &Key, nonce: &Vec<u8>, to_process: &Vec<u8>) -> Vec<u8> {
+    let mut my_ciper = aes::ctr(key.size, &key.key, nonce);
+    let mut processed = vec![0u8; to_process.len()];
+    my_ciper.process(to_process, &mut processed[..]);
+
+    processed
+}
+
+fn invert(to_invert: &Vec<u8>) -> Vec<u8> {
+    let mut inverted = vec![0u8; to_invert.len()];
+    for ctr in 0..to_invert.len() {
+        inverted[to_invert.len() - ctr - 1] = to_invert[ctr];
     }
 
-    /*
-    let mut nonce = vec![0u8; key.key.len()];
-    thread_rng().fill_bytes(&mut nonce);
+    inverted
+}
 
-    match adapter_stream.write_all(&nonce).await {
+async fn authenticate(key: Key, stream: TcpStream) -> Result<(), Error> {
+
+    // TODO: A potential optimization is to send "bounce", nonce, and challenges as one single write
+
+    // Read and write "bounce"
+    match read_and_write(&stream, &b"bounce".to_vec(), Duration::from_secs_f32(0.5)).await {
         Err(err) => return Err(err),
-        Ok(()) => {}
-    }
-
-    let mut challenge_encrypted = vec![0u8; key.key.len()];
-    match read_buffer(&adapter_stream, &mut challenge_encrypted).await {
-        Err(err) => return Err(err),
-        Ok(_) => {}
-    };
-
-    let mut cipher = aes::ctr(key.size, &key.key, &nonce);
-
-    let mut output = vec![0u8; key.key.len()];
-    cipher.process(&challenge_encrypted, &mut output[..]);
-    match adapter_stream.write_all(&output).await {
-        Err(err) => return Err(err),
-        Ok(()) => {}
-    }
-
-    for ctr in 0..output.len() {
-        output[ctr] = output[ctr] ^ 0xff;
-    }
-
-    match adapter_stream.write_all(&output).await {
-        Err(err) => return Err(err),
-        Ok(()) => {}
-    }
-
-    let mut challenge = vec![0u8; key.key.len()];
-    thread_rng().fill_bytes(&mut challenge);
-    cipher.process(&challenge_encrypted, &mut output[..]);
-
-    match adapter_stream.write_all(&output).await {
-        Err(err) => return Err(err),
-        Ok(()) => {}
-    }
-
-    match read_buffer(&adapter_stream, &mut challenge_encrypted).await {
-        Err(err) => return Err(err),
-        Ok(_) => {}
-    };
-
-    for ctr in 0..challenge_encrypted.len() {
-        let expected_value = challenge[ctr] ^ 0xff;
-        if challenge_encrypted[ctr] != expected_value {
-            return Err(Error::new(ErrorKind::InvalidData, "Challenge failed"));
+        Ok(bounce_buffer) => {
+            if bounce_buffer[..] != b"bounce"[..] {
+                return Err(Error::new(ErrorKind::InvalidData, "This is not a bounce server or client"));
+            }
         }
     }
 
-    // https://crates.io/crates/cryptostream
-    // https://zsiciarz.github.io/24daysofrust/book/vol1/day21.html
-    */
+    // Read and write nonces
+    let mut my_nonce = vec![0u8; key.key.len()];
+    thread_rng().fill_bytes(&mut my_nonce);
+
+    let their_nonce = match read_and_write(&stream, &my_nonce, Duration::from_secs_f32(0.5)).await {
+        Err(err) => return Err(err),
+        Ok(n) => n
+    };
+
+    // Read and write challenges
+    let mut my_challenge = vec![0u8; key.key.len()];
+    thread_rng().fill_bytes(&mut my_challenge);
+    let my_challenge_encrypted = process(&key, &my_nonce, &my_challenge);
+
+    let their_challenge_encrypted = match read_and_write(&stream, &my_challenge_encrypted, Duration::from_secs_f32(0.5)).await {
+        Err(err) => return Err(err),
+        Ok(n) => n
+    };
+
+    let their_challenge = process(&key, &their_nonce, &their_challenge_encrypted);
+
+    // Invert the challenge
+    let their_challenge_inverted = invert(&their_challenge);
+
+    let their_challenge_encrypted_inverted = process(&key, &their_nonce, &their_challenge_inverted);
+
+    // Read and write inverted challenges
+    let my_challenge_encrypted_inverted = match read_and_write(&stream, &their_challenge_encrypted_inverted, Duration::from_secs_f32(0.5)).await {
+        Err(err) => return Err(err),
+        Ok(n) => n
+    };
+
+    // Verify challenges
+    let my_challenge_inverted = process(&key, &my_nonce, &my_challenge_encrypted_inverted);
+    let my_challenge_solved = invert(&my_challenge_inverted);
+
+    if my_challenge != my_challenge_solved {
+        return Err(Error::new(ErrorKind::InvalidData, "Challenge failed"));
+    }
 
     Ok(())
 }
@@ -210,6 +219,18 @@ mod tests {
 
     use super::*;
 
+    async fn get_socket_streams() -> (TcpStream, TcpStream) {
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+        let listener = TcpListener::bind(socket_addr).await.unwrap();
+
+        let local_addr = listener.local_addr().unwrap();
+
+        let client_stream = TcpStream::connect(local_addr).await.unwrap();
+        let server_stream = listener.incoming().next().await.unwrap().unwrap();
+
+        (client_stream, server_stream)
+    }
+
     #[async_std::test]
     async fn authenticate_works() {
 
@@ -218,13 +239,7 @@ mod tests {
             size: KeySize::KeySize128
         };
 
-        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-        let listener = TcpListener::bind(socket_addr).await.unwrap();
-
-        let local_addr = listener.local_addr().unwrap();
-
-        let client_stream = TcpStream::connect(local_addr).await.unwrap();
-        let server_stream = listener.incoming().next().await.unwrap().unwrap();
+        let (client_stream, server_stream) = get_socket_streams().await;
 
         let client_authenticate_future = task::spawn(authenticate(key.clone(), client_stream));
         let server_authenticate_future = task::spawn(authenticate(key.clone(), server_stream));
@@ -241,16 +256,10 @@ mod tests {
             size: KeySize::KeySize128
         };
 
-        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-        let listener = TcpListener::bind(socket_addr).await.unwrap();
-
-        let local_addr = listener.local_addr().unwrap();
-
-        let client_stream = TcpStream::connect(local_addr).await.unwrap();
-        let server_stream = listener.incoming().next().await.unwrap().unwrap();
+        let (client_stream, server_stream) = get_socket_streams().await;
 
         let client_authenticate_future = task::spawn(authenticate(key.clone(), client_stream));
-        let server_emulate_future = task::spawn(write_buffer(server_stream.clone(), b"boXXce"));
+        let server_emulate_future = task::spawn(write_buffer(server_stream.clone(), b"boXXce".to_vec()));
 
         server_emulate_future.await.unwrap();
         
@@ -268,16 +277,10 @@ mod tests {
             size: KeySize::KeySize128
         };
 
-        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-        let listener = TcpListener::bind(socket_addr).await.unwrap();
-
-        let local_addr = listener.local_addr().unwrap();
-
-        let client_stream = TcpStream::connect(local_addr).await.unwrap();
-        let server_stream = listener.incoming().next().await.unwrap().unwrap();
+        let (client_stream, server_stream) = get_socket_streams().await;
 
         let client_authenticate_future = task::spawn(authenticate(key.clone(), client_stream));
-        let server_emulate_future = task::spawn(write_buffer(server_stream.clone(), b"short"));
+        let server_emulate_future = task::spawn(write_buffer(server_stream.clone(), b"short".to_vec()));
 
         server_emulate_future.await.unwrap();
         
@@ -295,13 +298,7 @@ mod tests {
             size: KeySize::KeySize128
         };
 
-        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-        let listener = TcpListener::bind(socket_addr).await.unwrap();
-
-        let local_addr = listener.local_addr().unwrap();
-
-        let client_stream = TcpStream::connect(local_addr).await.unwrap();
-        let server_stream = listener.incoming().next().await.unwrap().unwrap();
+        let (client_stream, server_stream) = get_socket_streams().await;
 
         let client_authenticate_future = task::spawn(authenticate(key.clone(), client_stream));
         server_stream.shutdown(Shutdown::Both).unwrap();
@@ -310,5 +307,84 @@ mod tests {
             Ok(_) => panic!("Failure not detected"),
             Err(err) => assert_eq!(ErrorKind::InvalidData, err.kind())
         }
+    }
+
+    #[async_std::test]
+    async fn authenticate_different_keys() {
+
+        let key_1 = Key {
+            key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            size: KeySize::KeySize128
+        };
+
+        let key_2 = Key {
+            key: vec![2 as u8, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+            size: KeySize::KeySize128
+        };
+
+        let (client_stream, server_stream) = get_socket_streams().await;
+
+        let client_authenticate_future = task::spawn(authenticate(key_1, client_stream));
+        let server_authenticate_future = task::spawn(authenticate(key_2, server_stream));
+
+        let client_authenticate_result = client_authenticate_future.await;
+        let server_authenticate_result = server_authenticate_future.await;
+
+        match client_authenticate_result {
+            Ok(_) => panic!("Failure not detected"),
+            Err(err) => assert_eq!(ErrorKind::InvalidData, err.kind())
+        }
+
+        match server_authenticate_result {
+            Ok(_) => panic!("Failure not detected"),
+            Err(err) => assert_eq!(ErrorKind::InvalidData, err.kind())
+        }
+    }
+
+    async fn read_and_write_take(stream: TcpStream, buffer_to_write: Vec<u8>, timeout: Duration) -> Result<Vec<u8>, Error> {
+        read_and_write(&stream, &buffer_to_write, timeout).await
+    }
+
+    #[async_std::test]
+    async fn verify_read_and_write() {
+        let a = vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+        let b = vec![10 as u8, 9, 8, 7, 6, 5, 4, 3, 2, 1];
+
+        let (client_stream, server_stream) = get_socket_streams().await;
+
+        let a_sent_future = task::spawn(read_and_write_take(server_stream.clone(), b.clone(), Duration::from_secs_f32(0.5)));
+        let b_sent = read_and_write(&client_stream, &a, Duration::from_secs_f32(0.5)).await.unwrap();
+        let a_sent = a_sent_future.await.unwrap();
+
+        assert_eq!(a, a_sent);
+        assert_eq!(b, b_sent);
+    }
+
+    #[test]
+    fn different_keys() {
+
+        let key_1 = Key {
+            key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            size: KeySize::KeySize128
+        };
+
+        let key_2 = Key {
+            key: vec![2 as u8, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+            size: KeySize::KeySize128
+        };
+
+        let mut secret = vec![0u8; key_1.key.len()];
+        thread_rng().fill_bytes(&mut secret);
+
+        let mut nonce = vec![0u8; key_1.key.len()];
+        thread_rng().fill_bytes(&mut nonce);
+
+        let encrypted = process(&key_1, &nonce, &secret);
+        
+        let decrypted = process(&key_2, &nonce, &encrypted);
+        assert_ne!(secret, decrypted);
+
+        let decrypted = process(&key_1, &nonce, &encrypted);
+        assert_eq!(secret, decrypted);
     }
 }
