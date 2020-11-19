@@ -3,10 +3,11 @@ use async_std::prelude::*;
 use async_std::task;
 
 use crypto::aes;
+use futures::future::{join, select};
 
 use crate::keys::{Key, Nonces};
 
-pub fn bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_stream_name: String, encrypted_stream: TcpStream, encrypted_stream_name: String) {
+pub fn run_bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_stream_name: String, encrypted_stream: TcpStream, encrypted_stream_name: String) {
 
     match clear_stream.set_nodelay(true) {
         Err(err) => {
@@ -24,10 +25,45 @@ pub fn bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_stream_na
         Ok(()) => {}
     }
 
-    task::spawn(bridge_connections_encrypted_write(key.clone(), nonces.my_nonce, clear_stream.clone(), clear_stream_name.clone(), encrypted_stream.clone(), encrypted_stream_name.clone()));
-    task::spawn(bridge_connections_encrypted_read(key, nonces.their_nonce, encrypted_stream, encrypted_stream_name, clear_stream, clear_stream_name));
+    task::spawn(bridge(key, nonces, clear_stream, clear_stream_name, encrypted_stream, encrypted_stream_name));
+}
 
-    // TODO: Await and log
+pub async fn bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_stream_name: String, encrypted_stream: TcpStream, encrypted_stream_name: String) {
+
+    let write_future = task::spawn(bridge_connections_encrypted_write(
+        key.clone(),
+        nonces.my_nonce,
+        clear_stream.clone(),
+        clear_stream_name.clone(),
+        encrypted_stream.clone(),
+        encrypted_stream_name.clone()));
+
+    let read_future = task::spawn(bridge_connections_encrypted_read(
+        key,
+        nonces.their_nonce,
+        encrypted_stream.clone(),
+        encrypted_stream_name.clone(),
+        clear_stream.clone(),
+        clear_stream_name.clone()));
+
+    select(write_future, read_future).await;
+
+    let clear_flush_future = task::spawn(flush(clear_stream.clone(), clear_stream_name.clone()));
+    let encrypted_flush_future = task::spawn(flush(encrypted_stream.clone(), encrypted_stream_name.clone()));
+
+    join(clear_flush_future, encrypted_flush_future).await;
+
+    println!("Connection ended");
+
+    match clear_stream.shutdown(Shutdown::Both) {
+        Ok(()) => println!("Successfully shut down {}", clear_stream_name),
+        Err(err) => println!("Error shutting down {}: {}", clear_stream_name, err)
+    }
+
+    match encrypted_stream.shutdown(Shutdown::Both) {
+        Ok(()) => println!("Successfully shut down {}", encrypted_stream_name),
+        Err(err) => println!("Error shutting down {}: {}", encrypted_stream_name, err)
+    }
 }
 
 async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader: TcpStream, reader_name: String, mut writer: TcpStream, writer_name: String)  {
@@ -36,14 +72,14 @@ async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader:
     let mut buf_encrypted = vec![0u8; keysize];
     let mut buf_decrypted = vec![0u8; keysize];
 
-    'bridge: loop {
+    loop {
         // Reads come in chunks of keysize
         let mut bytes_read_in_packet: usize = 0;
         'read_loop: loop {
             let bytes_read = match reader.read(&mut buf_encrypted).await {
                 Err(err) => {
                     println!("Reading {} stopped: {}", reader_name, err);                
-                    break 'bridge;
+                    return;
                 },
                 Ok(bytes_read) => {
                     if bytes_read == 0 {
@@ -53,7 +89,7 @@ async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader:
                             println!("{} terminated with incomplete packet", reader_name);
                         }
 
-                        break 'bridge;
+                        return;
                     }
 
                     bytes_read
@@ -78,30 +114,14 @@ async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader:
         match writer.write_all(write_slice).await {
             Err(err) => {
                 println!("Writing {} stopped: {}", writer_name, err);
-                break 'bridge;
+                return;
             },
             Ok(()) => {
                 println!("Wrote {} bytes to {}", packet_size, writer_name);
             }
         }
     }
-    match writer.flush().await {
-        Err(err) => println!("Can not flush: {}", err),
-        Ok(()) =>{}
-    }
-
-    // TODO: Avoid copy & paste, move to back to inital "bridge" function using a "select!" to wait on either subtask
-    match reader.shutdown(Shutdown::Both) {
-        Ok(()) => println!("Successfully shut down {}", reader_name),
-        Err(err) => println!("Error shutting down {}: {}", reader_name, err)
-    }
-
-    match writer.shutdown(Shutdown::Both) {
-        Ok(()) => println!("Successfully shut down {}", writer_name),
-        Err(err) => println!("Error shutting down {}: {}", writer_name, err)
-    }
 }
-
 
 async fn bridge_connections_encrypted_write(key: Key, nonce: Vec<u8>, mut reader: TcpStream, reader_name: String, mut writer: TcpStream, writer_name: String)  {
     
@@ -109,16 +129,16 @@ async fn bridge_connections_encrypted_write(key: Key, nonce: Vec<u8>, mut reader
     let mut buf_clear = vec![0u8; keysize];
     let mut buf_encrypted = vec![0u8; keysize];
 
-    'bridge: loop {
+    loop {
         let packet_size = match reader.read(&mut buf_clear[1..]).await {
             Err(err) => {
                 println!("Reading {} stopped: {}", reader_name, err);                
-                break 'bridge;
+                return;
             },
             Ok(bytes_read) => {
                 if bytes_read == 0 {
                     println!("{} complete", reader_name);
-                    break 'bridge;
+                    return;
                 }
 
                 bytes_read
@@ -136,32 +156,24 @@ async fn bridge_connections_encrypted_write(key: Key, nonce: Vec<u8>, mut reader
         match writer.write_all(&buf_encrypted[..]).await {
             Err(err) => {
                 println!("Writing {} stopped: {}", writer_name, err);
-                break 'bridge;
+                return;
             },
             Ok(()) => {
                 println!("Wrote {} bytes to {}", packet_size, writer_name);
             }
         }
     }
-    match writer.flush().await {
-        Err(err) => println!("Can not flush: {}", err),
-        Ok(()) =>{}
-    }
-
-    // TODO: Avoid copy & paste, move to back to inital "bridge" function using a "select!" to wait on either subtask
-    match reader.shutdown(Shutdown::Both) {
-        Ok(()) => println!("Successfully shut down {}", reader_name),
-        Err(err) => println!("Error shutting down {}: {}", reader_name, err)
-    }
-
-    match writer.shutdown(Shutdown::Both) {
-        Ok(()) => println!("Successfully shut down {}", writer_name),
-        Err(err) => println!("Error shutting down {}: {}", writer_name, err)
-    }
 }
 
 fn process(key: &Key, nonce: &Vec<u8>, source: &Vec<u8>, destination: &mut [u8]) {
     let mut ciper = aes::ctr(key.size, &key.key, &nonce);
     ciper.process(source, destination);
+}
+
+async fn flush(mut stream: TcpStream, stream_name: String) {
+    match stream.flush().await {
+        Err(err) => println!("Can not flush {}: {}", stream_name, err),
+        Ok(()) => {}
+    }
 }
 

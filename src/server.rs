@@ -2,7 +2,7 @@ use async_std::net::{IpAddr, Ipv4Addr, TcpListener, SocketAddr};
 use async_std::prelude::*;
 
 use crate::auth::authenticate;
-use crate::bridge::bridge;
+use crate::bridge::run_bridge;
 use crate::keys::Key;
 
 pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
@@ -23,11 +23,6 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
         match adapter_stream {
             Err(err) => println!("Error accepting adapter stream: {}", err),
             Ok(mut adapter_stream) => {
-
-                // TODO: Break this out into a sub-function
-                // If there is an error, shutdown adapter_stream
-
-                // TODO task::spawn
 
                 println!("Incoming adapter stream");
 
@@ -64,7 +59,7 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
                     Ok(()) => {}
                 }
 
-                bridge(key.clone(), nonce, stream, "incoming".to_string(), adapter_stream, "bounce-outgoing".to_string());
+                run_bridge(key.clone(), nonce, stream, "incoming".to_string(), adapter_stream, "bounce-outgoing".to_string());
             }
         }
     }

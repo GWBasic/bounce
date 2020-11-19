@@ -2,7 +2,7 @@ use async_std::net::TcpStream;
 use async_std::prelude::*;
 
 use crate::auth::authenticate;
-use crate::bridge::bridge;
+use crate::bridge::run_bridge;
 use crate::keys::Key;
 
 pub async fn run_client(bounce_server: String, destination_host: String, key: Key) {
@@ -50,7 +50,7 @@ pub async fn run_client(bounce_server: String, destination_host: String, key: Ke
 
                         println!("Bridging connection");
 
-                        bridge(key.clone(), nonces, destination_stream, "outgoing".to_string(), bounce_stream, "bounce-incoming".to_string());
+                        run_bridge(key.clone(), nonces, destination_stream, "outgoing".to_string(), bounce_stream, "bounce-incoming".to_string());
                     }
                 }        
             }
