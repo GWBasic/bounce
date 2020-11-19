@@ -1,9 +1,10 @@
 use async_std::net::{Shutdown, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
+use std::io::{Error, ErrorKind};
 
 use crypto::aes;
-use futures::future::{join, select};
+use futures::future::{Either, join, select};
 
 use crate::keys::{Key, Nonces};
 
@@ -46,7 +47,16 @@ pub async fn bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_str
         clear_stream.clone(),
         clear_stream_name.clone()));
 
-    select(write_future, read_future).await;
+    match select(write_future, read_future).await {
+        Either::Left(r) => match r.0 {
+            Err(err) => println!("{} -> {} ended: {}", clear_stream_name, encrypted_stream_name, err),
+            _ => {}
+        },
+        Either::Right(r) => match r.0 {
+            Err(err) => println!("{} -> {} ended: {}", encrypted_stream_name, clear_stream_name, err),
+            _ => {}
+        },
+    }
 
     let clear_flush_future = task::spawn(flush(clear_stream.clone(), clear_stream_name.clone()));
     let encrypted_flush_future = task::spawn(flush(encrypted_stream.clone(), encrypted_stream_name.clone()));
@@ -66,7 +76,7 @@ pub async fn bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_str
     }
 }
 
-async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader: TcpStream, reader_name: String, mut writer: TcpStream, writer_name: String)  {
+async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader: TcpStream, reader_name: String, mut writer: TcpStream, _writer_name: String) -> Result<(), Error> {
     
     let keysize = key.key.len();
     let mut buf_encrypted = vec![0u8; keysize];
@@ -76,25 +86,15 @@ async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader:
         // Reads come in chunks of keysize
         let mut bytes_read_in_packet: usize = 0;
         'read_loop: loop {
-            let bytes_read = match reader.read(&mut buf_encrypted[bytes_read_in_packet..keysize]).await {
-                Err(err) => {
-                    println!("Reading {} stopped: {}", reader_name, err);                
-                    return;
-                },
-                Ok(bytes_read) => {
-                    if bytes_read == 0 {
-                        if bytes_read_in_packet == 0 {
-                            println!("{} complete", reader_name);
-                        } else {
-                            println!("{} terminated with incomplete packet", reader_name);
-                        }
+            let bytes_read = reader.read(&mut buf_encrypted[bytes_read_in_packet..keysize]).await?;
 
-                        return;
-                    }
-
-                    bytes_read
+            if bytes_read == 0 {
+                if bytes_read_in_packet == 0 {
+                    return Ok(());
+                } else {
+                    return Err(Error::new(ErrorKind::Interrupted, format!("{} terminated with incomplete packet", reader_name)));
                 }
-            };
+            }
 
             bytes_read_in_packet = bytes_read_in_packet + bytes_read;
 
@@ -111,39 +111,23 @@ async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader:
         //println!("Read {} bytes from {}", packet_size, reader_name);
 
         let write_slice = &buf_decrypted[1..packet_size + 1];
-        match writer.write_all(write_slice).await {
-            Err(err) => {
-                println!("Writing {} stopped: {}", writer_name, err);
-                return;
-            },
-            Ok(()) => {
-                //println!("Wrote {} bytes to {}", packet_size, writer_name);
-            }
-        }
+        writer.write_all(write_slice).await?;
     }
 }
 
-async fn bridge_connections_encrypted_write(key: Key, nonce: Vec<u8>, mut reader: TcpStream, reader_name: String, mut writer: TcpStream, writer_name: String)  {
+async fn bridge_connections_encrypted_write(key: Key, nonce: Vec<u8>, mut reader: TcpStream, _reader_name: String, mut writer: TcpStream, _writer_name: String) -> Result<(), Error> {
     
     let keysize = key.key.len();
     let mut buf_clear = vec![0u8; keysize];
     let mut buf_encrypted = vec![0u8; keysize];
 
     loop {
-        let packet_size = match reader.read(&mut buf_clear[1..]).await {
-            Err(err) => {
-                println!("Reading {} stopped: {}", reader_name, err);                
-                return;
-            },
-            Ok(bytes_read) => {
-                if bytes_read == 0 {
-                    println!("{} complete", reader_name);
-                    return;
-                }
+        let packet_size = reader.read(&mut buf_clear[1..]).await?;
 
-                bytes_read
-            }
-        };
+        if packet_size == 0 {
+            //println!("{} complete", reader_name);
+            return Ok(());
+        }
 
         //println!("Read {} bytes from {}", packet_size, reader_name);
 
@@ -153,15 +137,8 @@ async fn bridge_connections_encrypted_write(key: Key, nonce: Vec<u8>, mut reader
         // Encrypt
         process(&key, &nonce, &buf_clear, &mut buf_encrypted);
 
-        match writer.write_all(&buf_encrypted[..]).await {
-            Err(err) => {
-                println!("Writing {} stopped: {}", writer_name, err);
-                return;
-            },
-            Ok(()) => {
-                //println!("Wrote {} bytes to {}", packet_size, writer_name);
-            }
-        }
+        writer.write_all(&buf_encrypted[..]).await?;
+        //println!("Wrote {} bytes to {}", packet_size, writer_name);
     }
 }
 

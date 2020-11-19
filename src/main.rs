@@ -61,7 +61,6 @@ async fn main_args() {
             let key = parse_key(&args[4]);
         
             run_server(port, adapter_port, key).await;
-
         },
         Mode::Client => {
 

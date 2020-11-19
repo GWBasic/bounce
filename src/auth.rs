@@ -17,33 +17,23 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> 
     // TODO: A potential optimization is to send "bounce", nonce, and challenges as one single write
 
     // Read and write "bounce"
-    match read_and_write(&stream, &b"bounce".to_vec(), Duration::from_secs_f32(0.5)).await {
-        Err(err) => return Err(err),
-        Ok(bounce_buffer) => {
-            if bounce_buffer[..] != b"bounce"[..] {
-                return Err(Error::new(ErrorKind::InvalidData, "This is not a bounce server or client"));
-            }
-        }
+    let bounce_buffer = read_and_write(&stream, &b"bounce".to_vec(), Duration::from_secs_f32(0.5)).await?;
+    if bounce_buffer[..] != b"bounce"[..] {
+        return Err(Error::new(ErrorKind::InvalidData, "This is not a bounce server or client"));
     }
 
     // Read and write nonces
     let mut my_nonce = vec![0u8; key.key.len()];
     thread_rng().fill_bytes(&mut my_nonce);
 
-    let their_nonce = match read_and_write(&stream, &my_nonce, Duration::from_secs_f32(0.5)).await {
-        Err(err) => return Err(err),
-        Ok(n) => n
-    };
+    let their_nonce = read_and_write(&stream, &my_nonce, Duration::from_secs_f32(0.5)).await?;
 
     // Read and write challenges
     let mut my_challenge = vec![0u8; key.key.len()];
     thread_rng().fill_bytes(&mut my_challenge);
     let my_challenge_encrypted = process(&key, &my_nonce, &my_challenge);
 
-    let their_challenge_encrypted = match read_and_write(&stream, &my_challenge_encrypted, Duration::from_secs_f32(0.5)).await {
-        Err(err) => return Err(err),
-        Ok(n) => n
-    };
+    let their_challenge_encrypted = read_and_write(&stream, &my_challenge_encrypted, Duration::from_secs_f32(0.5)).await?;
 
     let their_challenge = process(&key, &their_nonce, &their_challenge_encrypted);
 
@@ -53,10 +43,7 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> 
     let their_challenge_encrypted_inverted = process(&key, &their_nonce, &their_challenge_inverted);
 
     // Read and write inverted challenges
-    let my_challenge_encrypted_inverted = match read_and_write(&stream, &their_challenge_encrypted_inverted, Duration::from_secs_f32(0.5)).await {
-        Err(err) => return Err(err),
-        Ok(n) => n
-    };
+    let my_challenge_encrypted_inverted = read_and_write(&stream, &their_challenge_encrypted_inverted, Duration::from_secs_f32(0.5)).await?;
 
     // Verify challenges
     let my_challenge_inverted = process(&key, &my_nonce, &my_challenge_encrypted_inverted);
@@ -73,7 +60,7 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> 
 }
 
 async fn read_buffer(mut stream: &TcpStream, buffer: &mut [u8], timeout: Duration) -> Result<(), Error> {
-    let mut bytes_read = 0;
+    let mut total_bytes_read = 0;
     loop {
         let read_future = stream.read(buffer).fuse();
         let timeout_future = task::sleep(timeout).fuse();
@@ -81,17 +68,15 @@ async fn read_buffer(mut stream: &TcpStream, buffer: &mut [u8], timeout: Duratio
         pin_mut!(read_future, timeout_future);
 
         select! {
-            read_result = read_future => match read_result {
-                Err(err) => return Err(err),
-                Ok(b) => {
-                    if b == 0 {
-                        return Err(Error::new(ErrorKind::InvalidData, "Socket closed prematurely"));
-                    }
-    
-                    bytes_read = bytes_read + b;
-                    if bytes_read == buffer.len() {
-                        return Ok(());
-                    }
+            read_result = read_future => {
+                let bytes_read = read_result?;
+                if bytes_read == 0 {
+                    return Err(Error::new(ErrorKind::InvalidData, "Socket closed prematurely"));
+                }
+
+                total_bytes_read = total_bytes_read + bytes_read;
+                if total_bytes_read >= buffer.len() {
+                    return Ok(());
                 }
             },
             _ = timeout_future => return Err(Error::new(ErrorKind::TimedOut, "timeout"))
@@ -109,15 +94,10 @@ async fn read_and_write(stream: &TcpStream, buffer_to_write: &Vec<u8>, timeout: 
 
     let mut buffer_to_read = vec![0u8; buffer_to_write.len()];
 
-    match read_buffer(&stream, &mut buffer_to_read, timeout).await {
-        Err(err) => return Err(err),
-        Ok(_) => {}
-    };
+    read_buffer(&stream, &mut buffer_to_read, timeout).await?;
 
-    match write_future.await {
-        Err(err) => return Err(err),
-        Ok(()) => Ok(buffer_to_read)
-    }
+    write_future.await?;
+    Ok(buffer_to_read)
 }
 
 fn process(key: &Key, nonce: &Vec<u8>, to_process: &Vec<u8>) -> Vec<u8> {
