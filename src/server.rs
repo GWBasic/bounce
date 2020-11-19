@@ -31,12 +31,12 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
 
                 println!("Incoming adapter stream");
 
-                match authenticate(key.clone(), adapter_stream.clone()).await {
+                let nonce = match authenticate(key.clone(), adapter_stream.clone()).await {
                     Err(err) => {
                         println!("Bad client: {}", err);
                         continue 'adapter_accept;
                     },
-                    _ => {}
+                    Ok(n) => n
                 };
 
                 let stream;
@@ -64,7 +64,7 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
                     Ok(()) => {}
                 }
 
-                bridge(stream, "incoming".to_string(), adapter_stream, "bounce-outgoing".to_string());
+                bridge(key.clone(), nonce, stream, "incoming".to_string(), adapter_stream, "bounce-outgoing".to_string());
             }
         }
     }

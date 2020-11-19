@@ -10,9 +10,9 @@ use futures::pin_mut;
 use futures::select;
 use rand::{RngCore, thread_rng};
 
-use crate::keys::Key;
+use crate::keys::{Key, Nonces};
 
-pub async fn authenticate(key: Key, stream: TcpStream) -> Result<(), Error> {
+pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> {
 
     // TODO: A potential optimization is to send "bounce", nonce, and challenges as one single write
 
@@ -66,7 +66,10 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<(), Error> {
         return Err(Error::new(ErrorKind::InvalidData, "Challenge failed"));
     }
 
-    Ok(())
+    Ok(Nonces {
+        my_nonce,
+        their_nonce
+    })
 }
 
 async fn read_buffer(mut stream: &TcpStream, buffer: &mut [u8], timeout: Duration) -> Result<(), Error> {

@@ -11,6 +11,12 @@ pub struct Key {
     pub size: KeySize
 }
 
+#[derive(Clone)]
+pub struct Nonces {
+    pub my_nonce: Vec<u8>,
+    pub their_nonce: Vec<u8>
+}
+
 pub fn generate_keys(size_bits: usize) {
 
     // Filter key sizes

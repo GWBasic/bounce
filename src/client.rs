@@ -16,11 +16,11 @@ pub async fn run_client(bounce_server: String, destination_host: String, key: Ke
             },
             Ok(mut bounce_stream) => {
 
-                match authenticate(key.clone(), bounce_stream.clone()).await {
+                let nonces = match authenticate(key.clone(), bounce_stream.clone()).await {
                     Err(err) => {
                         panic!("Can not connect to server: {}", err);
                     },
-                    _ => {}
+                    Ok(n) => n
                 };
 
                 let mut buf: [u8; 9] = [0; 9];
@@ -50,7 +50,7 @@ pub async fn run_client(bounce_server: String, destination_host: String, key: Ke
 
                         println!("Bridging connection");
 
-                        bridge(bounce_stream, "bounce-incoming".to_string(), destination_stream, "outgoing".to_string());
+                        bridge(key.clone(), nonces, destination_stream, "outgoing".to_string(), bounce_stream, "bounce-incoming".to_string());
                     }
                 }        
             }
