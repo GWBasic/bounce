@@ -131,9 +131,7 @@ mod tests {
 
     use super::*;
 
-    fn create_stream_and_data_and_rng() -> (Cursor<Vec<u8>>, Vec<u8>, <ChaCha8Rng as SeedableRng>::Seed, ChaCha8Rng, ChaCha8Rng) {
-        let len = 1024 * 1024;
-        let stream_buf = vec![0u8; len];
+    fn create_stream_and_data_and_rng(stream_buf: Vec<u8>) -> (Cursor<Vec<u8>>, <ChaCha8Rng as SeedableRng>::Seed, ChaCha8Rng, ChaCha8Rng) {
         let memory_stream = Cursor::new(stream_buf);
 
         let mut test_seed: <ChaCha8Rng as SeedableRng>::Seed = Default::default();
@@ -142,16 +140,18 @@ mod tests {
 
         let ignored_rng = ChaCha8Rng::seed_from_u64(0);
 
-        let mut test_contents = vec![0u8; len];
-        thread_rng().fill(&mut test_contents[..]);
-
-        (memory_stream, test_contents, test_seed, test_rng, ignored_rng)
+        (memory_stream, test_seed, test_rng, ignored_rng)
     }
 
     #[async_std::test]
     async fn encrypted_stream_works_write() {
+        let len = 1024 * 1024;
+        let stream_buf = vec![0u8; len];
 
-        let (memory_stream, test_contents, test_seed, test_rng, ignored_rng) = create_stream_and_data_and_rng();
+        let (memory_stream, test_seed, test_rng, ignored_rng) = create_stream_and_data_and_rng(stream_buf);
+
+        let mut test_contents = vec![0u8; len];
+        thread_rng().fill(&mut test_contents[..]);
 
         let mut encrypted_stream = EncryptedStream::new(memory_stream, test_rng, ignored_rng);
 
@@ -173,10 +173,13 @@ mod tests {
 
     #[async_std::test]
     async fn encrypted_stream_works_read() {
+        let len = 1024 * 1024;
+        let mut encrypted_contents = vec![0u8; len];
+        thread_rng().fill(&mut encrypted_contents[..]);
 
-        let (memory_stream, encrypted_contents, test_seed, test_rng, ignored_rng) = create_stream_and_data_and_rng();
+        let (memory_stream, test_seed, test_rng, ignored_rng) = create_stream_and_data_and_rng(encrypted_contents.clone());
 
-        let mut encrypted_stream = EncryptedStream::new(memory_stream, test_rng, ignored_rng);
+        let mut encrypted_stream = EncryptedStream::new(memory_stream, ignored_rng, test_rng);
 
         let mut decrypted_contents = vec![0u8; encrypted_contents.len()];
         let mut bytes_read = 0;
