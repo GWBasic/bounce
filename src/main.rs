@@ -1,6 +1,7 @@
 mod auth;
 mod bridge;
 mod client;
+mod encrypted_stream;
 mod keys;
 mod server;
 

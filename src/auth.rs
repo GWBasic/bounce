@@ -9,6 +9,8 @@ use futures::future::FutureExt;
 use futures::pin_mut;
 use futures::select;
 use rand::{RngCore, thread_rng};
+//use rand::{Rng, SeedableRng};
+//use rand_chacha::ChaCha12Rng;
 
 use crate::keys::{Key, Nonces};
 
@@ -52,6 +54,11 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> 
     if my_challenge != my_challenge_solved {
         return Err(Error::new(ErrorKind::InvalidData, "Challenge failed"));
     }
+
+    // Equivalent to a 32-byte vector
+    /*let mut seed: <ChaCha12Rng as SeedableRng>::Seed = Default::default();
+    thread_rng().fill(&mut seed);
+    let rng = ChaCha12Rng::from_seed(seed);*/
 
     Ok(Nonces {
         my_nonce,
