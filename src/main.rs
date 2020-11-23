@@ -6,6 +6,11 @@ mod server;
 mod xor;
 
 use std::env::{args, var};
+use std::io::Write;
+
+use chrono::Local;
+use env_logger::Builder;
+use log::LevelFilter;
 
 use client::run_client;
 use keys::{Key, generate_keys, parse_key};
@@ -15,10 +20,27 @@ use server::run_server;
 async fn main() {
     println!("Bounce");
 
+    setup_logging();
+
     match var("BOUNCE_MODE") {
         Ok(mode) => main_env(mode).await,
         Err(_) => main_args().await
-    }
+    };
+}
+
+fn setup_logging() {
+    Builder::new()
+        .parse_env("BOUNCE_LOG")
+        .format(|buf, record| {
+            writeln!(buf,
+                "{} [{}] - {}",
+                Local::now().format("%Y-%m-%dT%H:%M:%S"),
+                record.level(),
+                record.args()
+            )
+        })
+        .filter(None, LevelFilter::Info)
+        .init();
 }
 
 async fn main_env(mode: String) {
