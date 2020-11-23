@@ -15,7 +15,7 @@ TRng: CryptoRng + RngCore + Clone + Any {
 
     match clear_stream.set_nodelay(true) {
         Err(err) => {
-            println!("Error disabling Nagle on {}: {}", clear_stream_name, err);
+            log::error!("Error disabling Nagle on {}: {}", clear_stream_name, err);
             return;
         },
         Ok(()) => {}
@@ -23,7 +23,7 @@ TRng: CryptoRng + RngCore + Clone + Any {
 
     match encrypted_stream.set_nodelay(true) {
         Err(err) => {
-            println!("Error disabling Nagle on {}: {}", encrypted_stream_name, err);
+            log::error!("Error disabling Nagle on {}: {}", encrypted_stream_name, err);
             return;
         },
         Ok(()) => {}
@@ -65,20 +65,20 @@ TRng: CryptoRng + RngCore + Clone + Any {
 
     join(clear_flush_future, encrypted_flush_future).await;
 
-    println!("Connection ended");
+    log::info!("Connection ended: {} <-> {}", clear_stream_name, encrypted_stream_name);
 
     match clear_stream.shutdown(Shutdown::Both) {
-        Ok(()) => println!("Successfully shut down {}", clear_stream_name),
-        Err(err) => println!("Error shutting down {}: {}", clear_stream_name, err)
+        Ok(()) => log::debug!("Successfully shut down {}", clear_stream_name),
+        Err(err) => log::error!("Error shutting down {}: {}", clear_stream_name, err)
     }
 
     match encrypted_stream.shutdown(Shutdown::Both) {
-        Ok(()) => println!("Successfully shut down {}", encrypted_stream_name),
-        Err(err) => println!("Error shutting down {}: {}", encrypted_stream_name, err)
+        Ok(()) => log::debug!("Successfully shut down {}", encrypted_stream_name),
+        Err(err) => log::error!("Error shutting down {}: {}", encrypted_stream_name, err)
     }
 }
 
-async fn run_bridge_loop<TRng>(mut xor: Xor<TRng>, mut reader: TcpStream, _reader_name: String, mut writer: TcpStream, _writer_name: String) -> Result<(), Error>  where
+async fn run_bridge_loop<TRng>(mut xor: Xor<TRng>, mut reader: TcpStream, reader_name: String, mut writer: TcpStream, writer_name: String) -> Result<(), Error>  where
 TRng: CryptoRng + RngCore + Clone  {
     
     let mut buf = vec![0u8; 4098];
@@ -87,20 +87,25 @@ TRng: CryptoRng + RngCore + Clone  {
         let bytes_read = reader.read(&mut buf).await?;
 
         if bytes_read == 0 {
+            log::debug!("Connected ended cleanly: {}", reader_name);
             return Ok(());
         }
+
+        log::trace!("Read {} bytes from {}", bytes_read, reader_name);
 
         // Decrypt
         xor.process(&mut buf[..bytes_read]);
 
         // Forward
         writer.write_all(&mut buf[..bytes_read]).await?;
+
+        log::trace!("Wrote {} bytes to {}", bytes_read, writer_name);
     }
 }
 
 async fn flush(mut stream: TcpStream, stream_name: String) {
     match stream.flush().await {
-        Err(err) => println!("Can not flush {}: {}", stream_name, err),
+        Err(err) => log::error!("Can not flush {}: {}", stream_name, err),
         Ok(()) => {}
     }
 }
