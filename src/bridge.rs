@@ -51,14 +51,14 @@ TRng: CryptoRng + RngCore + Clone + Any {
 
     match select(write_future, read_future).await {
         Either::Left(r) => match r.0 {
-            Err(err) => println!("{} -> {} ended: {}", clear_stream_name, encrypted_stream_name, err),
+            Err(err) => log::error!("{} -> {} ended in error: {}", clear_stream_name, encrypted_stream_name, err),
             _ => {}
         },
         Either::Right(r) => match r.0 {
-            Err(err) => println!("{} -> {} ended: {}", encrypted_stream_name, clear_stream_name, err),
+            Err(err) => log::error!("{} -> {} ended in error: {}", encrypted_stream_name, clear_stream_name, err),
             _ => {}
         },
-    }
+    };
 
     let clear_flush_future = task::spawn(flush(clear_stream.clone(), clear_stream_name.clone()));
     let encrypted_flush_future = task::spawn(flush(encrypted_stream.clone(), encrypted_stream_name.clone()));
