@@ -17,12 +17,9 @@ pub struct Nonces {
     pub their_nonce: Vec<u8>
 }
 
-pub fn generate_keys(size_bits: usize) {
+pub fn generate_keys() {
 
-    // Filter key sizes
-    let _ = get_key_size(size_bits);
-
-    let mut key = vec![0u8; size_bits / 8];
+    let mut key = vec![0u8; 256 / 8];
     OsRng.fill_bytes(&mut key);
 
     println!("Key: {}", key.to_base64(STANDARD));
@@ -34,11 +31,18 @@ pub fn parse_key(key_str: &str) -> Key {
         Ok(v) => v
     };
 
-    let size = get_key_size(key.len() * 8);
+    if key.len() * 8 != 256 {
+        panic!("Only 256-bit keys are supported");
+    }
+    //let size = get_key_size(key.len() * 8);
 
-    Key {key, size}
+    Key {
+        key,
+        size: KeySize::KeySize256
+    }
 }
 
+/*
 pub fn get_key_size(size_bits: usize) -> KeySize {
     match size_bits {
         128 => KeySize::KeySize128,
@@ -46,7 +50,7 @@ pub fn get_key_size(size_bits: usize) -> KeySize {
         256 => KeySize::KeySize256,
         _ => panic!("Keysize {} not supported", size_bits)
     }
-}
+}*/
 
 #[cfg(test)]
 mod tests {

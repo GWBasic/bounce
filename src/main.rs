@@ -38,8 +38,7 @@ async fn main_env(mode: String) {
             run_client(bounce_server, destination_host, key).await;
         },
         Mode::Keys => {
-            let length = get_usize_from_env("BOUNCE_KEY_LENGTH");
-            generate_keys(length);
+            generate_keys();
         }
     }
 }
@@ -76,13 +75,11 @@ async fn main_args() {
             run_client(bounce_server, destination_host, key).await;
         },
         Mode::Keys => {
-            if args.len() != 3 {
-                panic!("Please specify the key size as command-line arguments:\n\t bounce keys [key size]");
+            if args.len() != 2 {
+                panic!("\"bounce keys\" takes no arguments");
             }
 
-            let length = parse_usize(&args[2]);
-
-            generate_keys(length);
+            generate_keys();
         }
     }
 }

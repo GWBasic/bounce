@@ -1,17 +1,22 @@
+use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
 use async_std::prelude::*;
 use async_std::task;
 use core::time::Duration;
+use std::any::Any;
+use std::convert::TryInto;
 use std::io::{Error, ErrorKind};
+use std::marker::Unpin;
 
 use crypto::aes;
 use futures::future::FutureExt;
 use futures::pin_mut;
 use futures::select;
 use rand::{RngCore, thread_rng};
-//use rand::{Rng, SeedableRng};
-//use rand_chacha::ChaCha12Rng;
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha12Rng;
 
+use crate::encrypted_stream::EncryptedStream;
 use crate::keys::{Key, Nonces};
 
 pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> {
@@ -19,7 +24,7 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> 
     // TODO: A potential optimization is to send "bounce", nonce, and challenges as one single write
 
     // Read and write "bounce"
-    let bounce_buffer = read_and_write(&stream, &b"bounce".to_vec(), Duration::from_secs_f32(0.5)).await?;
+    let bounce_buffer = read_and_write(stream.clone(), &b"bounce".to_vec(), Duration::from_secs_f32(0.5)).await?;
     if bounce_buffer[..] != b"bounce"[..] {
         return Err(Error::new(ErrorKind::InvalidData, "This is not a bounce server or client"));
     }
@@ -28,17 +33,30 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> 
     let mut my_nonce = vec![0u8; key.key.len()];
     thread_rng().fill_bytes(&mut my_nonce);
 
-    let their_nonce = read_and_write(&stream, &my_nonce, Duration::from_secs_f32(0.5)).await?;
+    let their_nonce = read_and_write(stream.clone(), &my_nonce, Duration::from_secs_f32(0.5)).await?;
 
-    // Read and write challenges
-    let mut my_challenge = vec![0u8; key.key.len()];
-    thread_rng().fill_bytes(&mut my_challenge);
-    let my_challenge_encrypted = process(&key, &my_nonce, &my_challenge);
+    // Read and write seeds
+    let mut my_seed: <ChaCha12Rng as SeedableRng>::Seed = Default::default();
+    thread_rng().fill(&mut my_seed);
+    let my_seed_encrypted = process(&key, &my_nonce, &my_seed);
 
-    let their_challenge_encrypted = read_and_write(&stream, &my_challenge_encrypted, Duration::from_secs_f32(0.5)).await?;
+    let their_seed_encrypted = read_and_write(stream.clone(), &my_seed_encrypted, Duration::from_secs_f32(0.5)).await?;
 
-    let their_challenge = process(&key, &their_nonce, &their_challenge_encrypted);
+    let their_seed = process(&key, &their_nonce, &their_seed_encrypted)[0..32].try_into().expect("Unexpected seed size");
+    let their_seed = <ChaCha12Rng as SeedableRng>::Seed::from(their_seed);
 
+    let write_rng = ChaCha12Rng::from_seed(my_seed);
+    let read_rng = ChaCha12Rng::from_seed(their_seed);
+
+    let encrypted_stream = EncryptedStream::new(stream, write_rng, read_rng);
+    let bounce_buffer = read_and_write(encrypted_stream.clone(), &b"bounce".to_vec(), Duration::from_secs_f32(0.5)).await?;
+    if bounce_buffer[..] != b"bounce"[..] {
+        return Err(Error::new(ErrorKind::InvalidData, "Authentication failed"));
+    }
+
+    //EncryptedStream
+
+    /*
     // Invert the challenge
     let their_challenge_inverted = invert(&their_challenge);
 
@@ -53,7 +71,7 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> 
 
     if my_challenge != my_challenge_solved {
         return Err(Error::new(ErrorKind::InvalidData, "Challenge failed"));
-    }
+    }*/
 
     // Equivalent to a 32-byte vector
     /*let mut seed: <ChaCha12Rng as SeedableRng>::Seed = Default::default();
@@ -66,7 +84,8 @@ pub async fn authenticate(key: Key, stream: TcpStream) -> Result<Nonces, Error> 
     })
 }
 
-async fn read_buffer(mut stream: &TcpStream, buffer: &mut [u8], timeout: Duration) -> Result<(), Error> {
+async fn read_buffer<TStream>(mut stream: TStream, buffer: &mut [u8], timeout: Duration) -> Result<(), Error>
+where TStream : Read + Write + Unpin {
     let mut total_bytes_read = 0;
     loop {
         let read_future = stream.read(buffer).fuse();
@@ -91,26 +110,28 @@ async fn read_buffer(mut stream: &TcpStream, buffer: &mut [u8], timeout: Duratio
     }
 }
 
-async fn write_buffer(mut stream: TcpStream, buffer: Vec<u8>) -> Result<(), Error> {
+async fn write_buffer<TStream>(mut stream: TStream, buffer: Vec<u8>) -> Result<(), Error>
+where TStream : Read + Write + Unpin {
     stream.write_all(&buffer).await
 }
 
-async fn read_and_write(stream: &TcpStream, buffer_to_write: &Vec<u8>, timeout: Duration) -> Result<Vec<u8>, Error> {
+async fn read_and_write<TStream>(stream: TStream, buffer_to_write: &Vec<u8>, timeout: Duration) -> Result<Vec<u8>, Error>
+where TStream : Read + Write + Unpin + Clone + Send + Any {
 
     let write_future = task::spawn(write_buffer(stream.clone(), buffer_to_write.clone()));
 
     let mut buffer_to_read = vec![0u8; buffer_to_write.len()];
 
-    read_buffer(&stream, &mut buffer_to_read, timeout).await?;
+    read_buffer(stream, &mut buffer_to_read, timeout).await?;
 
     write_future.await?;
     Ok(buffer_to_read)
 }
 
-fn process(key: &Key, nonce: &Vec<u8>, to_process: &Vec<u8>) -> Vec<u8> {
+fn process(key: &Key, nonce: &Vec<u8>, to_process: &[u8]) -> Vec<u8> {
     let mut my_ciper = aes::ctr(key.size, &key.key, nonce);
     let mut processed = vec![0u8; to_process.len()];
-    my_ciper.process(to_process, &mut processed[..]);
+    my_ciper.process(to_process, &mut processed);
 
     processed
 }
@@ -256,7 +277,7 @@ mod tests {
     }
 
     async fn read_and_write_take(stream: TcpStream, buffer_to_write: Vec<u8>, timeout: Duration) -> Result<Vec<u8>, Error> {
-        read_and_write(&stream, &buffer_to_write, timeout).await
+        read_and_write(stream, &buffer_to_write, timeout).await
     }
 
     #[async_std::test]
@@ -267,7 +288,7 @@ mod tests {
         let (client_stream, server_stream) = get_socket_streams().await;
 
         let a_sent_future = task::spawn(read_and_write_take(server_stream.clone(), b.clone(), Duration::from_secs_f32(0.5)));
-        let b_sent = read_and_write(&client_stream, &a, Duration::from_secs_f32(0.5)).await.unwrap();
+        let b_sent = read_and_write_take(client_stream, a.clone(), Duration::from_secs_f32(0.5)).await.unwrap();
         let a_sent = a_sent_future.await.unwrap();
 
         assert_eq!(a, a_sent);

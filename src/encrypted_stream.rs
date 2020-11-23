@@ -1,17 +1,23 @@
 use async_std::io;
 use async_std::io::{Read, Result, Write};
 use async_std::task::{Context, Poll};
+use std::boxed::Box;
+use std::cell::RefCell;
 use std::marker::Unpin;
+use std::ops::{ Deref, DerefMut };
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 use rand_core::{CryptoRng, RngCore};
 
+// Unpin + Sync + Clone + Send + Any
+#[derive(Clone)]
 pub struct EncryptedStream<TStream, TRng> where
     TStream: Read + Write,
     TRng: CryptoRng + RngCore {
     wrapped_stream: TStream,
-    write_xor: Xor<TRng>,
-    read_xor: Xor<TRng>,
+    write_xor: Arc<Mutex<Box<Xor<TRng>>>>,
+    read_xor: Arc<Mutex<Box<Xor<TRng>>>>,
 }
 
 pub struct Xor<TRng> {
@@ -30,8 +36,8 @@ impl<TStream, TRng> EncryptedStream<TStream, TRng> where
     pub fn new(wrapped_stream: TStream, write_rng: TRng, read_rng: TRng) -> EncryptedStream<TStream, TRng> {
         EncryptedStream {
             wrapped_stream,
-            write_xor: Xor::new(write_rng),
-            read_xor: Xor::new(read_rng),
+            write_xor: Arc::new(Mutex::new(Box::new(Xor::new(write_rng)))),
+            read_xor: Arc::new(Mutex::new(Box::new(Xor::new(read_rng)))),
         }
     }
 }
@@ -73,8 +79,37 @@ impl<TStream: Read + Unpin, TRng> Read for EncryptedStream<TStream, TRng> where
         match result {
             Poll::Ready(result) => match result {
                 Result::Ok(size) => {
+                    let read_xor = self.read_xor.get_mut().unwrap();
                     for ctr in 0..size {
-                        buf[ctr] = buf[ctr] ^ self.read_xor.next_byte();
+                        buf[ctr] = buf[ctr] ^ read_xor.next_byte();
+                    }
+        
+                    Poll::Ready(Result::Ok(size))
+                },
+                Result::Err(err) => Poll::Ready(Result::Err(err))
+            },
+            Poll::Pending => Poll::Pending
+        }
+    }
+}
+
+impl<TStream: Read + Unpin, TRng> Read for &EncryptedStream<TStream, TRng> where
+    TStream: Read + Write,
+    TRng: CryptoRng + RngCore {
+
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<io::Result<usize>> {
+        let result = Pin::new(&mut self.wrapped_stream).poll_read(cx, buf);
+
+        match result {
+            Poll::Ready(result) => match result {
+                Result::Ok(size) => {
+                    let mut read_xor = self.read_xor.get_mut().unwrap();
+                    for ctr in 0..size {
+                        buf[ctr] = buf[ctr] ^ read_xor.next_byte();
                     }
         
                     Poll::Ready(Result::Ok(size))
@@ -97,8 +132,9 @@ impl<TStream: Write + Unpin, TRng> Write for EncryptedStream<TStream, TRng> wher
     ) -> Poll<io::Result<usize>> {
         let mut encrypted = vec![0; buf.len()];
 
+        let mut write_xor = self.write_xor.get_mut().unwrap();
         for ctr in 0..buf.len() {
-            encrypted[ctr] = buf[ctr] ^ self.write_xor.next_byte();
+            encrypted[ctr] = buf[ctr] ^ write_xor.next_byte();
         }
 
         Pin::new(&mut self.wrapped_stream).poll_write(cx, &encrypted)
@@ -120,7 +156,49 @@ impl<TStream: Write + Unpin, TRng> Write for EncryptedStream<TStream, TRng> wher
 }
 
 
-// Test with https://docs.rs/async-std/1.7.0/async_std/io/struct.Cursor.html
+impl<TStream: Write + Unpin, TRng> Write for &EncryptedStream<TStream, TRng> where
+    TStream: Read + Write,
+    TRng: CryptoRng + RngCore {
+
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let mut encrypted = vec![0; buf.len()];
+
+        let mut write_xor = self.write_xor.get_mut().unwrap();
+        for ctr in 0..buf.len() {
+            encrypted[ctr] = buf[ctr] ^ write_xor.next_byte();
+        }
+
+        Pin::new(&mut self.wrapped_stream).poll_write(cx, &encrypted)
+    }
+
+    fn poll_flush(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>
+    ) -> std::task::Poll<std::result::Result<(), std::io::Error>> {
+        Pin::new(&mut self.wrapped_stream).poll_flush(cx)
+    }
+
+    fn poll_close(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>
+    ) -> std::task::Poll<std::result::Result<(), std::io::Error>> {
+        Pin::new(&mut self.wrapped_stream).poll_close(cx)
+    }
+}
+
+unsafe impl<TStream: Write + Unpin, TRng> Send for EncryptedStream<TStream, TRng> where
+    TStream: Read + Write,
+    TRng: CryptoRng + RngCore {
+}
+
+unsafe impl<TRng> Send for Xor<TRng> where
+    TRng: CryptoRng + RngCore {
+}
+
 #[cfg(test)]
 mod tests {
     use async_std::io::Cursor;
