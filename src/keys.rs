@@ -12,12 +12,6 @@ pub struct Key {
     pub size: KeySize
 }
 
-/*#[derive(Clone)]
-pub struct Nonces {
-    pub my_nonce: Vec<u8>,
-    pub their_nonce: Vec<u8>
-}*/
-
 pub fn generate_keys() {
     let mut key = vec![0u8; 256 / 8];
     OsRng.fill_bytes(&mut key);
@@ -39,16 +33,7 @@ pub fn parse_key(key_str: &str) -> Key {
 
     Key {key, size}
 }
-/*
-pub fn get_key_size(size_bits: usize) -> KeySize {
-    match size_bits {
-        128 => KeySize::KeySize128,
-        192 => KeySize::KeySize192,
-        256 => KeySize::KeySize256,
-        _ => panic!("Keysize {} not supported", size_bits)
-    }
-}
-*/
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,27 +49,6 @@ mod tests {
             }
         )
     );
-
-    /*
-    #[test]
-    fn parse_key_test_128() {
-        let key = vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-        let key_str = key.to_base64(STANDARD);
-
-        let parsed_key = parse_key(&key_str);
-        assert_eq!(key, parsed_key.key);
-        matches!(KeySize::KeySize128, parsed_key.size);
-    }
-
-    #[test]
-    fn parse_key_test_192() {
-        let key = vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
-        let key_str = key.to_base64(STANDARD);
-
-        let parsed_key = parse_key(&key_str);
-        assert_eq!(key, parsed_key.key);
-        matches!(KeySize::KeySize192, parsed_key.size);
-    }*/
 
     #[test]
     fn parse_key_test_256() {

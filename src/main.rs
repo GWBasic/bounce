@@ -112,21 +112,6 @@ fn get_server_from_env(var_name: &str) -> String {
     }
 }
 
-/*
-fn get_usize_from_env(var_name: &str) -> usize {
-    match var(var_name) {
-        Ok(size_str) => parse_usize(&size_str),
-        Err(_) => panic!("{} must be set", var_name)
-    }
-}
-
-fn parse_usize(size_str: &str) -> usize {
-    match size_str.parse::<usize>() {
-        Ok(size) => size,
-        Err(err) => panic!("Invalid size \"{}\": {}", size_str, err)
-    }
-}*/
-
 enum Mode {
     Server,
     Client,

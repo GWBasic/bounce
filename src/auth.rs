@@ -16,7 +16,6 @@ use rand::{RngCore, thread_rng};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha12Rng;
 
-//use crate::encrypted_stream::EncryptedStream;
 use crate::keys::Key;
 use crate::xor::{Xor, Xors};
 
@@ -121,15 +120,6 @@ fn process(key: &Key, nonce: &Vec<u8>, to_process: &[u8]) -> Vec<u8> {
 
     processed
 }
-/*
-fn invert(to_invert: &Vec<u8>) -> Vec<u8> {
-    let mut inverted = vec![0u8; to_invert.len()];
-    for ctr in 0..to_invert.len() {
-        inverted[to_invert.len() - ctr - 1] = to_invert[ctr];
-    }
-
-    inverted
-}*/
 
 #[cfg(test)]
 mod tests {
