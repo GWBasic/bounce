@@ -1,17 +1,18 @@
 use async_std::net::{IpAddr, Ipv4Addr, TcpListener, SocketAddr};
 use async_std::prelude::*;
+use std::io::Error;
 
 use crate::auth::authenticate;
 use crate::bridge::run_bridge;
 use crate::keys::Key;
 
-pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
+pub async fn run_server(port: u16, adapter_port: u16, key: Key) -> Result<(), Error> {
 
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
-    let listener = TcpListener::bind(socket_addr).await.unwrap();
+    let listener = TcpListener::bind(socket_addr).await?;
 
     let adapter_socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), adapter_port);
-    let adapter_listener = TcpListener::bind(adapter_socket_addr).await.unwrap();
+    let adapter_listener = TcpListener::bind(adapter_socket_addr).await?;
 
     let mut incoming = listener.incoming();
     let mut adapter_incoming = adapter_listener.incoming();
@@ -66,5 +67,7 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
             }
         }
     }
+
+    Ok(())
 }
 
