@@ -1,14 +1,17 @@
 use async_std::net::{Shutdown, TcpStream};
 use async_std::prelude::*;
 use async_std::task;
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
-use crypto::aes;
+use core::any::Any;
+
 use futures::future::{Either, join, select};
+use rand_core::{CryptoRng, RngCore};
 
-use crate::keys::{Key, Nonces};
+use crate::xor::{Xor, Xors};
 
-pub fn run_bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_stream_name: String, encrypted_stream: TcpStream, encrypted_stream_name: String) {
+pub fn run_bridge<TRng>(xors: Xors<TRng>, clear_stream: TcpStream, clear_stream_name: String, encrypted_stream: TcpStream, encrypted_stream_name: String) where
+TRng: CryptoRng + RngCore + Clone + Any {
 
     match clear_stream.set_nodelay(true) {
         Err(err) => {
@@ -26,22 +29,21 @@ pub fn run_bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_strea
         Ok(()) => {}
     }
 
-    task::spawn(bridge(key, nonces, clear_stream, clear_stream_name, encrypted_stream, encrypted_stream_name));
+    task::spawn(bridge(xors.clone(), clear_stream, clear_stream_name, encrypted_stream, encrypted_stream_name));
 }
 
-pub async fn bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_stream_name: String, encrypted_stream: TcpStream, encrypted_stream_name: String) {
+pub async fn bridge<TRng>(xors: Xors<TRng>, clear_stream: TcpStream, clear_stream_name: String, encrypted_stream: TcpStream, encrypted_stream_name: String) where
+TRng: CryptoRng + RngCore + Clone + Any {
 
-    let write_future = task::spawn(bridge_connections_encrypted_write(
-        key.clone(),
-        nonces.my_nonce,
+    let write_future = task::spawn(run_bridge_loop(
+        xors.write_xor,
         clear_stream.clone(),
         clear_stream_name.clone(),
         encrypted_stream.clone(),
         encrypted_stream_name.clone()));
 
-    let read_future = task::spawn(bridge_connections_encrypted_read(
-        key,
-        nonces.their_nonce,
+    let read_future = task::spawn(run_bridge_loop(
+        xors.read_xor,
         encrypted_stream.clone(),
         encrypted_stream_name.clone(),
         clear_stream.clone(),
@@ -76,75 +78,24 @@ pub async fn bridge(key: Key, nonces: Nonces, clear_stream: TcpStream, clear_str
     }
 }
 
-async fn bridge_connections_encrypted_read(key: Key, nonce: Vec<u8>, mut reader: TcpStream, reader_name: String, mut writer: TcpStream, _writer_name: String) -> Result<(), Error> {
+async fn run_bridge_loop<TRng>(mut xor: Xor<TRng>, mut reader: TcpStream, _reader_name: String, mut writer: TcpStream, _writer_name: String) -> Result<(), Error>  where
+TRng: CryptoRng + RngCore + Clone  {
     
-    let keysize = key.key.len();
-    let mut buf_encrypted = vec![0u8; keysize];
-    let mut buf_decrypted = vec![0u8; keysize];
+    let mut buf = vec![0u8; 4098];
 
     loop {
-        // Reads come in chunks of keysize
-        let mut bytes_read_in_packet: usize = 0;
-        'read_loop: loop {
-            let bytes_read = reader.read(&mut buf_encrypted[bytes_read_in_packet..keysize]).await?;
+        let bytes_read = reader.read(&mut buf).await?;
 
-            if bytes_read == 0 {
-                if bytes_read_in_packet == 0 {
-                    return Ok(());
-                } else {
-                    return Err(Error::new(ErrorKind::Interrupted, format!("{} terminated with incomplete packet", reader_name)));
-                }
-            }
-
-            bytes_read_in_packet = bytes_read_in_packet + bytes_read;
-
-            if bytes_read_in_packet >= keysize {
-                break 'read_loop;
-            }
-        }
-
-        // Decrypt
-        process(&key, &nonce, &buf_encrypted, &mut buf_decrypted);
-
-        // Note: An assumption is that there will never be more than a 256 bit key, thus the size of the buffer will always fit into the first byte
-        let packet_size: usize = buf_decrypted[0] as usize;
-        //println!("Read {} bytes from {}", packet_size, reader_name);
-
-        let write_slice = &buf_decrypted[1..packet_size + 1];
-        writer.write_all(write_slice).await?;
-    }
-}
-
-async fn bridge_connections_encrypted_write(key: Key, nonce: Vec<u8>, mut reader: TcpStream, _reader_name: String, mut writer: TcpStream, _writer_name: String) -> Result<(), Error> {
-    
-    let keysize = key.key.len();
-    let mut buf_clear = vec![0u8; keysize];
-    let mut buf_encrypted = vec![0u8; keysize];
-
-    loop {
-        let packet_size = reader.read(&mut buf_clear[1..]).await?;
-
-        if packet_size == 0 {
-            //println!("{} complete", reader_name);
+        if bytes_read == 0 {
             return Ok(());
         }
 
-        //println!("Read {} bytes from {}", packet_size, reader_name);
+        // Decrypt
+        xor.process(&mut buf[..bytes_read]);
 
-        // Note: An assumption is that there will never be more than a 256 bit key, thus the size of the buffer will always fit into the first byte
-        buf_clear[0] = packet_size as u8;
-
-        // Encrypt
-        process(&key, &nonce, &buf_clear, &mut buf_encrypted);
-
-        writer.write_all(&buf_encrypted[..]).await?;
-        //println!("Wrote {} bytes to {}", packet_size, writer_name);
+        // Forward
+        writer.write_all(&mut buf[..bytes_read]).await?;
     }
-}
-
-fn process(key: &Key, nonce: &Vec<u8>, source: &Vec<u8>, destination: &mut [u8]) {
-    let mut ciper = aes::ctr(key.size, &key.key, &nonce);
-    ciper.process(source, destination);
 }
 
 async fn flush(mut stream: TcpStream, stream_name: String) {
@@ -159,8 +110,8 @@ mod tests {
     use async_std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, SocketAddr};
     use async_std::prelude::*;
 
-    use crypto::aes::KeySize;
-    use rand::{RngCore, thread_rng};
+    use rand::{RngCore, SeedableRng, thread_rng};
+    use rand_chacha::ChaCha8Rng;
 
     use super::*;
 
@@ -216,36 +167,30 @@ mod tests {
     }
 
     async fn start() -> TcpStreams {
-        let key = Key {
-            key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
-            size: KeySize::KeySize128
-        };
 
         let streams = get_socket_streams().await;
 
-        let nonces_server = Nonces {
-            my_nonce: vec![17 as u8, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
-            their_nonce: vec![33 as u8, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48]
-        };
-
-        let nonces_client = Nonces {
-            my_nonce: nonces_server.their_nonce.clone(),
-            their_nonce: nonces_server.my_nonce.clone()
+        let xors = Xors {
+            read_xor: Xor::new(ChaCha8Rng::seed_from_u64(1)),
+            write_xor: Xor::new(ChaCha8Rng::seed_from_u64(2))
         };
 
         // server
         run_bridge(
-            key.clone(),
-            nonces_server,
+            xors,
             streams.bounce_server_clear_stream.clone(),
             "bounce_server_clear_stream".to_string(),
             streams.bounce_server_encrypted_stream.clone(),
             "bounce_server_encrypted_stream".to_string());
 
+        let xors = Xors {
+            read_xor: Xor::new(ChaCha8Rng::seed_from_u64(2)),
+            write_xor: Xor::new(ChaCha8Rng::seed_from_u64(1))
+        };
+    
         // client
         run_bridge(
-            key.clone(),
-            nonces_client,
+            xors,
             streams.bounce_client_clear_stream.clone(),
             "bounce_client_clear_stream".to_string(),
             streams.bounce_client_encrypted_stream.clone(),

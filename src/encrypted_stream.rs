@@ -1,3 +1,10 @@
+// Currently commented out
+// The right way to do this is to wrap an object that implements async Read and Write
+// But I can't figure out the magic syntax to correctly wrap something that does Read and Write
+// These are the frustrations that come with learning Rust
+
+
+/*
 use async_std::io;
 use async_std::io::{Read, Result, Write};
 use async_std::task::{Context, Poll};
@@ -203,3 +210,4 @@ mod tests {
         }
     }
 }
+*/

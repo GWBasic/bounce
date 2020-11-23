@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["client", "localhost:3457", "localhost:3000", "2Zr5TSYgy15Gx31MyO8ijw=="],
+            "args": ["client", "localhost:3457", "localhost:3000", "0BiYfI/YlqXfGvFrJo2pcf7ddFDPU9CXU0SPcoMJkSE="],
             "cwd": "${workspaceFolder}",
             "env": {
                 "_BOUNCE_MODE": "server",
