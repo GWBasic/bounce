@@ -3,6 +3,7 @@ mod bridge;
 mod client;
 mod keys;
 mod server;
+mod xor;
 
 use std::env::{args, var};
 
@@ -37,8 +38,7 @@ async fn main_env(mode: String) {
             run_client(bounce_server, destination_host, key).await;
         },
         Mode::Keys => {
-            let length = get_usize_from_env("BOUNCE_KEY_LENGTH");
-            generate_keys(length);
+            generate_keys();
         }
     }
 }
@@ -75,13 +75,11 @@ async fn main_args() {
             run_client(bounce_server, destination_host, key).await;
         },
         Mode::Keys => {
-            if args.len() != 3 {
-                panic!("Please specify the key size as command-line arguments:\n\t bounce keys [key size]");
+            if args.len() != 2 {
+                panic!("Generating keys takes no arguments");
             }
 
-            let length = parse_usize(&args[2]);
-
-            generate_keys(length);
+            generate_keys();
         }
     }
 }
@@ -111,20 +109,6 @@ fn get_server_from_env(var_name: &str) -> String {
     match var(var_name) {
         Ok(server) => server,
         Err(_) => panic!("{} must be set", var_name)
-    }
-}
-
-fn get_usize_from_env(var_name: &str) -> usize {
-    match var(var_name) {
-        Ok(size_str) => parse_usize(&size_str),
-        Err(_) => panic!("{} must be set", var_name)
-    }
-}
-
-fn parse_usize(size_str: &str) -> usize {
-    match size_str.parse::<usize>() {
-        Ok(size) => size,
-        Err(err) => panic!("Invalid size \"{}\": {}", size_str, err)
     }
 }
 

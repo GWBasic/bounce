@@ -26,7 +26,7 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
 
                 println!("Incoming adapter stream");
 
-                let nonce = match authenticate(key.clone(), adapter_stream.clone()).await {
+                let xors = match authenticate(key.clone(), adapter_stream.clone()).await {
                     Err(err) => {
                         println!("Bad client: {}", err);
                         continue 'adapter_accept;
@@ -59,7 +59,7 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key) {
                     Ok(()) => {}
                 }
 
-                run_bridge(key.clone(), nonce, stream, "incoming".to_string(), adapter_stream, "bounce-outgoing".to_string());
+                run_bridge(xors, stream, "incoming".to_string(), adapter_stream, "bounce-outgoing".to_string());
             }
         }
     }
