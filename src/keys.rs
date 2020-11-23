@@ -8,7 +8,7 @@ use rustc_serialize::base64::{FromBase64, STANDARD, ToBase64};
 #[derive(Clone)]
 pub struct Key {
     pub key: Vec<u8>,
-    // TODO: This is always KeySize::KeySize256
+    // This is always KeySize::KeySize256
     pub size: KeySize
 }
 
@@ -29,7 +29,7 @@ pub fn parse_key(key_str: &str) -> Key {
         panic!("Only 256-bit keys supported")
     }
 
-    let size = KeySize::KeySize256;//get_key_size(key.len() * 8);
+    let size = KeySize::KeySize256;
 
     Key {key, size}
 }
