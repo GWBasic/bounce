@@ -20,7 +20,6 @@ pub async fn run_client(bounce_server: String, destination_host: String, key: Ke
         let mut read = 0;
 
         'read_loop: loop {
-            // TODO: This read should have a timeout
             let r = bounce_stream.read(&mut buf[read..]).await?;
 
             if r == 0 {
@@ -118,7 +117,5 @@ mod tests {
 
         server_stream.shutdown(Shutdown::Write).expect("Can not shut down server stream");
     }
-
-    // TODO: Test timeout
 }
 
