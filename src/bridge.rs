@@ -15,7 +15,7 @@ TRng: CryptoRng + RngCore + Clone + Any {
 
     match clear_stream.set_nodelay(true) {
         Err(err) => {
-            println!("Error disabling Nagle on {}: {}", clear_stream_name, err);
+            log::error!("Error disabling Nagle on {}: {}", clear_stream_name, err);
             return;
         },
         Ok(()) => {}
@@ -23,7 +23,7 @@ TRng: CryptoRng + RngCore + Clone + Any {
 
     match encrypted_stream.set_nodelay(true) {
         Err(err) => {
-            println!("Error disabling Nagle on {}: {}", encrypted_stream_name, err);
+            log::error!("Error disabling Nagle on {}: {}", encrypted_stream_name, err);
             return;
         },
         Ok(()) => {}
@@ -51,34 +51,27 @@ TRng: CryptoRng + RngCore + Clone + Any {
 
     match select(write_future, read_future).await {
         Either::Left(r) => match r.0 {
-            Err(err) => println!("{} -> {} ended: {}", clear_stream_name, encrypted_stream_name, err),
-            _ => {}
+            Ok(()) => {
+                shutdown_both(clear_stream, clear_stream_name.clone(), Shutdown::Write, encrypted_stream, encrypted_stream_name.clone(), Shutdown::Both).await;
+            },
+            Err(err) => {
+                shutdown_both(clear_stream, clear_stream_name.clone(), Shutdown::Both, encrypted_stream, encrypted_stream_name.clone(), Shutdown::Both).await;
+                log::error!("{} -> {} ended in error: {}", clear_stream_name, encrypted_stream_name, err);
+            }
         },
         Either::Right(r) => match r.0 {
-            Err(err) => println!("{} -> {} ended: {}", encrypted_stream_name, clear_stream_name, err),
-            _ => {}
+            Ok(()) => {
+                shutdown_both(encrypted_stream, encrypted_stream_name.clone(), Shutdown::Write, clear_stream, clear_stream_name.clone(), Shutdown::Both).await;
+            },
+            Err(err) => {
+                shutdown_both(encrypted_stream, encrypted_stream_name.clone(), Shutdown::Both, clear_stream, clear_stream_name.clone(), Shutdown::Both).await;
+                log::error!("{} -> {} ended in error: {}", encrypted_stream_name, clear_stream_name, err);
+            }
         },
-    }
-
-    let clear_flush_future = task::spawn(flush(clear_stream.clone(), clear_stream_name.clone()));
-    let encrypted_flush_future = task::spawn(flush(encrypted_stream.clone(), encrypted_stream_name.clone()));
-
-    join(clear_flush_future, encrypted_flush_future).await;
-
-    println!("Connection ended");
-
-    match clear_stream.shutdown(Shutdown::Both) {
-        Ok(()) => println!("Successfully shut down {}", clear_stream_name),
-        Err(err) => println!("Error shutting down {}: {}", clear_stream_name, err)
-    }
-
-    match encrypted_stream.shutdown(Shutdown::Both) {
-        Ok(()) => println!("Successfully shut down {}", encrypted_stream_name),
-        Err(err) => println!("Error shutting down {}: {}", encrypted_stream_name, err)
-    }
+    };
 }
 
-async fn run_bridge_loop<TRng>(mut xor: Xor<TRng>, mut reader: TcpStream, _reader_name: String, mut writer: TcpStream, _writer_name: String) -> Result<(), Error>  where
+async fn run_bridge_loop<TRng>(mut xor: Xor<TRng>, mut reader: TcpStream, reader_name: String, mut writer: TcpStream, writer_name: String) -> Result<(), Error>  where
 TRng: CryptoRng + RngCore + Clone  {
     
     let mut buf = vec![0u8; 4098];
@@ -87,21 +80,52 @@ TRng: CryptoRng + RngCore + Clone  {
         let bytes_read = reader.read(&mut buf).await?;
 
         if bytes_read == 0 {
+            log::debug!("Connected ending: {}", reader_name);
             return Ok(());
         }
+
+        log::trace!("Read {} bytes from {}", bytes_read, reader_name);
 
         // Decrypt
         xor.process(&mut buf[..bytes_read]);
 
         // Forward
         writer.write_all(&mut buf[..bytes_read]).await?;
+
+        log::trace!("Wrote {} bytes to {}", bytes_read, writer_name);
     }
 }
 
-async fn flush(mut stream: TcpStream, stream_name: String) {
+async fn shutdown_both(
+    clear_stream: TcpStream,
+    clear_stream_name: String,
+    clear_stream_shutdown: Shutdown,
+    encrypted_stream: TcpStream,
+    encrypted_stream_name: String,
+    encrypted_stream_shutdown: Shutdown) {
+    
+    let clear_flush_future = task::spawn(shutdown(clear_stream.clone(), clear_stream_name.clone(), clear_stream_shutdown));
+    let encrypted_flush_future = task::spawn(shutdown(encrypted_stream.clone(), encrypted_stream_name.clone(), encrypted_stream_shutdown));
+
+    join(clear_flush_future, encrypted_flush_future).await;
+
+    log::info!("Connection ended: {} <-> {}", clear_stream_name, encrypted_stream_name);
+}
+
+
+async fn shutdown(
+    mut stream: TcpStream,
+    stream_name: String,
+    shutdown: Shutdown) {
+
     match stream.flush().await {
-        Err(err) => println!("Can not flush {}: {}", stream_name, err),
-        Ok(()) => {}
+        Ok(()) => log::debug!("Successfully flushed down {}", stream_name),
+        Err(err) => log::error!("Can not flush {}: {}", stream_name, err),
+    }
+
+    match stream.shutdown(shutdown) {
+        Ok(()) => log::debug!("Successfully shut down {}", stream_name),
+        Err(err) => log::error!("Error shutting down {}: {}", stream_name, err)
     }
 }
 

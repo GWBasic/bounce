@@ -22,11 +22,12 @@
             "args": ["client", "localhost:3457", "localhost:3000", "0BiYfI/YlqXfGvFrJo2pcf7ddFDPU9CXU0SPcoMJkSE="],
             "cwd": "${workspaceFolder}",
             "env": {
-                "_BOUNCE_MODE": "server",
-                "_PORT": "3456",
-                "_ADAPTER_PORT": "3457",
-                "_BOUNCE_SERVER": "localhost:3456",
-                "_BOUNCE_DESTINATION_HOST": "localhost:3457",
+                /*"BOUNCE_MODE": "client",
+                "BOUNCE_PORT": "3456",
+                "BOUNCE_ADAPTER_PORT": "3457",
+                "BOUNCE_KEY": "0BiYfI/YlqXfGvFrJo2pcf7ddFDPU9CXU0SPcoMJkSE=",
+                "BOUNCE_SERVER": "localhost:3457",
+                "BOUNCE_DESTINATION_HOST": "localhost:3000",*/
             }
         },
         {
