@@ -47,7 +47,10 @@
                 }
             },
             "args": [], //"server_sends_incorrect_token"],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1"
+            }
         }
     ]
 }
