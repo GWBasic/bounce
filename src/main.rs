@@ -1,6 +1,7 @@
 mod auth;
 mod bridge;
 mod client;
+mod completion_token;
 mod keys;
 mod server;
 mod xor;
@@ -13,6 +14,7 @@ use env_logger::Builder;
 use log::LevelFilter;
 
 use client::run_client;
+use completion_token::CompletionToken;
 use keys::{Key, generate_keys, parse_key};
 use server::run_server;
 
@@ -58,7 +60,7 @@ async fn main_env(mode: String) -> Result<(), Error> {
             let adapter_port = get_port_from_env("BOUNCE_ADAPTER_PORT")?;
             let key = get_key_from_env("BOUNCE_KEY")?;
         
-            run_server(port, adapter_port, key).await?;
+            run_server(port, adapter_port, key, CompletionToken::new(), CompletionToken::new()).await?;
         },
         Mode::Client => {
             let bounce_server = get_env_var("BOUNCE_SERVER")?;
@@ -94,7 +96,7 @@ async fn main_args() -> Result<(), Error> {
             let adapter_port = parse_port(&args[3]).unwrap();
             let key = parse_key(&args[4]);
         
-            run_server(port, adapter_port, key).await?;
+            run_server(port, adapter_port, key, CompletionToken::new(), CompletionToken::new()).await?;
         },
         Mode::Client => {
 
