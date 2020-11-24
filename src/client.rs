@@ -9,6 +9,8 @@ use crate::keys::Key;
 pub async fn run_client(bounce_server: String, destination_host: String, key: Key) -> Result<(), Error> {
     log::info!("Bounce client: Connecting to bounce server at {}, bouncing to {}", bounce_server, destination_host);
 
+    let connected = b"connected";
+
     'client_loop: loop {
         let mut bounce_stream = TcpStream::connect(bounce_server.clone()).await?;
 
@@ -17,24 +19,25 @@ pub async fn run_client(bounce_server: String, destination_host: String, key: Ke
         let mut buf: [u8; 9] = [0; 9];
         let mut read = 0;
 
-        while read < 9 {
-            match bounce_stream.read(&mut buf[read..9]).await {
-                Err(err) => {
-                    log::error!("Problem with connection to bounce server \"{}\": {}", bounce_server, err);
-                    continue 'client_loop;
-                },
-                Ok(r) => read = read + r
+        'read_loop: loop {
+            let r = bounce_stream.read(&mut buf[read..9]).await?;
+
+            if r == 0 {
+                log::error!("Connection to bounce server {} ended", bounce_server);
+                bounce_stream.shutdown(Shutdown::Write)?;
+                continue 'client_loop;
+            }
+
+            read = read + r;
+
+            if read >= connected.len() {
+                break 'read_loop;
             }
         }
 
-        if b"connected" != &buf {
+        if connected != &buf {
             log::error!("Bounce server did not initiate the connection correctly");
-
-            match bounce_stream.shutdown(Shutdown::Both) {
-                Ok(()) => {},
-                Err(err) => log::error!("Error shutting down bounce_stream: {}", err)
-            }
-
+            bounce_stream.shutdown(Shutdown::Both)?;
             continue 'client_loop;
         }
 
@@ -54,3 +57,8 @@ pub async fn run_client(bounce_server: String, destination_host: String, key: Ke
 
     Ok(())
 }
+
+// TODO: Tests
+// Happy path
+// Disconnect prematurely
+// Send wrong token
