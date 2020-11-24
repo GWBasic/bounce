@@ -60,7 +60,7 @@ async fn main_env(mode: String) -> Result<(), Error> {
             let adapter_port = get_port_from_env("BOUNCE_ADAPTER_PORT")?;
             let key = get_key_from_env("BOUNCE_KEY")?;
         
-            run_server(port, adapter_port, key, CompletionToken::new()).await?;
+            run_server(port, adapter_port, key, CompletionToken::new(), CompletionToken::new()).await?;
         },
         Mode::Client => {
             let bounce_server = get_env_var("BOUNCE_SERVER")?;
@@ -96,7 +96,7 @@ async fn main_args() -> Result<(), Error> {
             let adapter_port = parse_port(&args[3]).unwrap();
             let key = parse_key(&args[4]);
         
-            run_server(port, adapter_port, key, CompletionToken::new()).await?;
+            run_server(port, adapter_port, key, CompletionToken::new(), CompletionToken::new()).await?;
         },
         Mode::Client => {
 

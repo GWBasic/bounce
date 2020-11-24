@@ -1,7 +1,7 @@
 use async_std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, TcpStream, SocketAddr};
 use async_std::prelude::*;
 use async_std::task;
-use std::io::Error;
+use std::io::{ Error, ErrorKind };
 
 use futures::future::{Either, select};
 
@@ -10,7 +10,7 @@ use crate::bridge::run_bridge;
 use crate::completion_token::CompletionToken;
 use crate::keys::Key;
 
-pub async fn run_server(port: u16, adapter_port: u16, key: Key, listening_token: CompletionToken) -> Result<(), Error> {
+pub async fn run_server(port: u16, adapter_port: u16, key: Key, listening_token: CompletionToken, cancelation_token: CompletionToken) -> Result<(), Error> {
 
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(socket_addr).await?;
@@ -22,12 +22,21 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key, listening_token:
     let adapter_socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), adapter_port);
     let adapter_listener = TcpListener::bind(adapter_socket_addr).await?;
 
+    // This is the ongoing task to wait for adapter sockets
+    let mut incoming_adapter_future = task::spawn(accept(adapter_listener));
+
     listening_token.complete();
 
     log::info!("Bounce server: Listening for incoming connections on {}, accepting adapter on port {}", port, adapter_port);
     
     'adapter_accept: loop {
-        let (mut adapter_stream, _) = adapter_listener.accept().await?;
+        let mut adapter_stream = match select(incoming_adapter_future, cancelation_token.clone()).await {
+            Either::Left(((listener, result), _)) => {
+                incoming_adapter_future = task::spawn(accept(listener));
+                result?
+            },
+            Either::Right(_) => return Err(Error::new(ErrorKind::Interrupted, "Server terminated"))
+        };
 
         log::info!("Incoming adapter stream: {:?}", adapter_stream.peer_addr().unwrap());
 
@@ -55,49 +64,43 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key, listening_token:
         // Worth noting: If we don't need to handle adapter_stream ending, this is significantly simpler!
 
 
-        let mut peek_future = task::spawn(peek(adapter_stream.clone()));
-        'accept: loop {
+        let peek_future = task::spawn(peek(adapter_stream.clone()));
 
-            match select(incoming_future, peek_future).await {
-                Either::Left(((listener, result), p)) => {
-                    incoming_future = task::spawn(accept(listener));
-                    match result {
-                        Ok(s) => {
-                            stream = s;
-                            break 'accept;
-                        },
-                        Err(err) => {
-                            log::error!("Error accepting incoming stream: {}", err);
-                            peek_future = p;
-                        }
-                    }
-                },
-                Either::Right((peek_result, i)) => {
-                    incoming_future = i;
-                    match peek_result {
-                        Ok(bytes_sent) => {
-                            let shutdown_result = if bytes_sent > 0 {
-                                log::warn!("Adapter stream sent unexpected data: {:?}", adapter_stream.peer_addr().unwrap());
-                                adapter_stream.shutdown(Shutdown::Both)
-                            } else {
-                                log::info!("Adapter stream ended: {:?}", adapter_stream.peer_addr().unwrap());
-                                adapter_stream.shutdown(Shutdown::Write)
-                            };
+        match select(incoming_future, select(peek_future, cancelation_token.clone())).await {
+            Either::Left(((listener, result), _)) => {
+                incoming_future = task::spawn(accept(listener));
+                stream = result?;
+            },
+            Either::Right((select_result, i)) => {
+                match select_result {
+                    Either::Left((peek_result, _)) => {
+                        incoming_future = i;
+                        match peek_result {
+                            Ok(bytes_sent) => {
+                                let shutdown_result = if bytes_sent > 0 {
+                                    log::warn!("Adapter stream sent unexpected data: {:?}", adapter_stream.peer_addr().unwrap());
+                                    adapter_stream.shutdown(Shutdown::Both)
+                                } else {
+                                    log::info!("Adapter stream ended: {:?}", adapter_stream.peer_addr().unwrap());
+                                    adapter_stream.shutdown(Shutdown::Write)
+                                };
 
-                            match shutdown_result {
-                                Ok(_) => {},
-                                Err(err) => log::error!("Error shutting down adapter stream: {:?}:, {}", adapter_stream.peer_addr().unwrap(), err)
+                                match shutdown_result {
+                                    Ok(_) => {},
+                                    Err(err) => log::error!("Error shutting down adapter stream: {:?}:, {}", adapter_stream.peer_addr().unwrap(), err)
+                                }
+
+                                continue 'adapter_accept;
+                            },
+                            Err(err) => {
+                                log::error!("Adapter stream aborted: {}", err);
+                                continue 'adapter_accept;
                             }
-
-                            continue 'adapter_accept;
-                        },
-                        Err(err) => {
-                            log::error!("Adapter stream aborted: {}", err);
-                            continue 'adapter_accept;
                         }
-                    }
-                },
-            };
+                    },
+                    Either::Right(_) => return Err(Error::new(ErrorKind::Interrupted, "Server terminated"))
+                }
+            }
         }
 
         log::info!("Incoming clear stream: {:?}", stream.peer_addr().unwrap());
@@ -140,7 +143,7 @@ mod tests {
 
     use super::*;
 
-    async fn get_adapter_stream_and_server_future() -> (TcpStream, SocketAddr, JoinHandle<Result<(), Error>>) {
+    async fn get_adapter_stream_and_server_future() -> (TcpStream, SocketAddr, JoinHandle<Result<(), Error>>, CompletionToken) {
         let key = Key {
             key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
             size: KeySize::KeySize256
@@ -157,8 +160,9 @@ mod tests {
         drop(adapter_listener);
 
         let listening_token = CompletionToken::new();
+        let cancelation_token = CompletionToken::new();
 
-        let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone(), listening_token.clone()));
+        let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone(), listening_token.clone(), cancelation_token.clone()));
 
         listening_token.await;
 
@@ -166,26 +170,28 @@ mod tests {
 
         authenticate(key, adapter_stream.clone()).await.expect("Can not authenticate client stream");
 
-        (adapter_stream, adapter_address, server_future)
+        (adapter_stream, adapter_address, server_future, cancelation_token)
     }
 
     #[async_std::test]
     async fn client_drops_connection() {
 
-        let (adapter_stream, adapter_address, server_future) = get_adapter_stream_and_server_future().await;
+        let (adapter_stream, adapter_address, server_future, cancelation_token) = get_adapter_stream_and_server_future().await;
 
         adapter_stream.shutdown(Shutdown::Both).expect("Can not shut down client stream");
 
         let adapter_stream = TcpStream::connect(adapter_address).await.expect("Can not connect to the server");
         adapter_stream.shutdown(Shutdown::Both).expect("Can not shut down client stream");
 
-        // TODO: Need a cancelation token to tell the server to shut down
+        cancelation_token.complete();
+        let err = server_future.await.expect_err("Server should terminate");
+        assert_eq!(ErrorKind::Interrupted, err.kind(), "");
     }
 
     #[async_std::test]
     async fn client_unexpected_write_connection() {
 
-        let (mut adapter_stream, adapter_address, server_future) = get_adapter_stream_and_server_future().await;
+        let (mut adapter_stream, adapter_address, server_future, cancelation_token) = get_adapter_stream_and_server_future().await;
 
         let buf = [0u8];
         adapter_stream.write_all(&buf).await.expect("Can not write to client stream");
@@ -193,7 +199,9 @@ mod tests {
         let adapter_stream = TcpStream::connect(adapter_address).await.expect("Can not connect to the server");
         adapter_stream.shutdown(Shutdown::Both).expect("Can not shut down client stream");
 
-        // TODO: Need a cancelation token to tell the server to shut down
+        cancelation_token.complete();
+        let err = server_future.await.expect_err("Server should terminate");
+        assert_eq!(ErrorKind::Interrupted, err.kind(), "");
     }
 }
 

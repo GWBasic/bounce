@@ -5,11 +5,11 @@ use std::task::{Context, Poll, Waker};
 
 #[derive(Debug)]
 pub struct CompletionToken {
-	shared_state: Arc<Mutex<CancelationTokenState>>
+	shared_state: Arc<Mutex<CompletionTokenState>>
 }
 
 #[derive(Debug)]
-struct CancelationTokenState {
+struct CompletionTokenState {
 	canceled: bool,
 	waker: Option<Waker>
 }
@@ -18,7 +18,7 @@ struct CancelationTokenState {
 impl CompletionToken {
 	pub fn new() -> CompletionToken {
 		CompletionToken {
-			shared_state: Arc::new(Mutex::new(CancelationTokenState {
+			shared_state: Arc::new(Mutex::new(CompletionTokenState {
 				canceled: false,
 				waker: None
 			}))
