@@ -7,9 +7,10 @@ use futures::future::{Either, select};
 
 use crate::auth::authenticate;
 use crate::bridge::run_bridge;
+use crate::completion_token::CompletionToken;
 use crate::keys::Key;
 
-pub async fn run_server(port: u16, adapter_port: u16, key: Key) -> Result<(), Error> {
+pub async fn run_server(port: u16, adapter_port: u16, key: Key, listening_token: CompletionToken) -> Result<(), Error> {
 
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(socket_addr).await?;
@@ -20,6 +21,8 @@ pub async fn run_server(port: u16, adapter_port: u16, key: Key) -> Result<(), Er
 
     let adapter_socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), adapter_port);
     let adapter_listener = TcpListener::bind(adapter_socket_addr).await?;
+
+    listening_token.complete();
 
     log::info!("Bounce server: Listening for incoming connections on {}, accepting adapter on port {}", port, adapter_port);
     
@@ -131,7 +134,7 @@ mod tests {
     use async_std::prelude::*;
     use async_std::task;
     use async_std::task::JoinHandle;
-    use std::io::{Error, ErrorKind};
+    use std::io::Error;
 
     use crypto::aes::KeySize;
 
@@ -153,10 +156,11 @@ mod tests {
         drop(listener);
         drop(adapter_listener);
 
-        let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone()));
+        let listening_token = CompletionToken::new();
 
-        // TODO: Need a signal to await on that indicates that the server is ready
-        task::sleep(core::time::Duration::from_secs_f32(0.5)).await;
+        let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone(), listening_token.clone()));
+
+        listening_token.await;
 
         let adapter_stream = TcpStream::connect(adapter_address).await.expect("Can not connect to the server");
 
