@@ -46,7 +46,7 @@
                     "kind": "bin"
                 }
             },
-            "args": [],//"authenticate_different_keys"],
+            "args": [], //"server_sends_incorrect_token"],
             "cwd": "${workspaceFolder}"
         }
     ]
