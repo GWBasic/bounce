@@ -163,3 +163,76 @@ fn parse_mode(mode: &String) -> Mode {
         panic!("Unknown mode: {}", mode);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use async_std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, SocketAddr};
+    use async_std::prelude::*;
+    use async_std::task;
+    use async_std::task::JoinHandle;
+    use std::io::{Error, ErrorKind};
+
+    use crypto::aes::KeySize;
+
+    use super::*;
+
+    async fn get_server_and_client_futures() -> (JoinHandle<Result<(), Error>>, JoinHandle<Result<(), Error>>, SocketAddr, CompletionToken, CompletionToken, TcpListener) {
+        let key = Key {
+            key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
+            size: KeySize::KeySize256
+        };
+
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+        let client_listener = TcpListener::bind(socket_addr).await.unwrap();
+        let adapter_listener = TcpListener::bind(socket_addr).await.unwrap();
+
+        let client_address = client_listener.local_addr().unwrap();
+        let adapter_address = adapter_listener.local_addr().unwrap();
+
+        drop(client_listener);
+        drop(adapter_listener);
+
+        let listening_token = CompletionToken::new();
+        let cancelation_token = CompletionToken::new();
+
+        let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone(), listening_token.clone(), cancelation_token.clone()));
+
+        let listener = TcpListener::bind(socket_addr).await.unwrap();
+        let client_future = task::spawn(run_client(adapter_address.to_string(), listener.local_addr().unwrap().to_string(), key.clone()));
+
+        (server_future, client_future, client_address, listening_token, cancelation_token, listener)
+
+
+        /*let key = Key {
+            key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
+            size: KeySize::KeySize256
+        };
+
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
+        let listener = TcpListener::bind(socket_addr).await.unwrap();
+
+        let local_addr = listener.local_addr().unwrap();
+
+        let client_future = task::spawn(run_client(local_addr.to_string(), "no destination".to_string(), key.clone()));
+
+        let server_stream = listener.incoming().next().await.unwrap().expect("Did not get incoming connection from the client");
+        drop(listener);
+
+        authenticate(key, server_stream.clone()).await.expect("Can not authenticate server stream");
+
+        (server_stream, client_future)*/
+    }
+
+    /*
+    #[async_std::test]
+    async fn server_drops_connection() {
+
+        let (server_stream, client_future) = get_server_stream_and_client_future().await;
+
+        server_stream.shutdown(Shutdown::Both).expect("Can not shut down server stream");
+
+        let err = client_future.await.expect_err("The client should end in error");
+
+        assert_eq!(err.kind(), ErrorKind::ConnectionRefused);
+    }*/
+}
