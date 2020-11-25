@@ -166,13 +166,14 @@ fn parse_mode(mode: &String) -> Mode {
 
 #[cfg(test)]
 mod tests {
-    use async_std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, SocketAddr};
+    use async_std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, TcpStream, SocketAddr};
     use async_std::prelude::*;
     use async_std::task;
     use async_std::task::JoinHandle;
     use std::io::{Error, ErrorKind};
 
     use crypto::aes::KeySize;
+    use rand::{RngCore, thread_rng};
 
     use super::*;
 
@@ -235,4 +236,53 @@ mod tests {
 
         assert_eq!(err.kind(), ErrorKind::ConnectionRefused);
     }*/
+
+    #[async_std::test]
+    async fn happy_path() {
+        /*let (server_future, client_future, client_address, listening_token, cancelation_token, listener) = get_server_and_client_futures().await;
+
+        let outgoing_stream = TcpStream::connect(client_address).await.expect("Can't connect");
+        let (incoming_stream, _) = listener.accept().await.expect("Incoming socket didn't come");
+
+        let mut rng = thread_rng();
+
+        let mut a = outgoing_stream.clone();
+        let mut b = incoming_stream.clone();
+
+        for _ in 0usize..100 {
+            let len = (rng.next_u64() % 2000) as usize;
+            let mut write_buf = vec!(0u8; len);
+            rng.fill_bytes(&mut write_buf);
+
+            let write_future = task::spawn(a.write_all(&write_buf));
+
+            let mut read_buf = vec!(0u8; len);
+
+            let mut total_bytes_read = 0;
+
+            'read_loop: loop {
+                let bytes_read = b.read(&mut read_buf).await.expect("Can't read");
+
+                if bytes_read == 0 {
+                    panic!("Socket closed early")
+                }
+
+                total_bytes_read = total_bytes_read + bytes_read;
+
+                if total_bytes_read >= len {
+                    break 'read_loop;
+                }
+            }
+
+            write_future.await.expect("Problem writing");
+
+            assert_eq!(write_buf, read_buf, "Contents garbled");
+
+            let c = a;
+            a = b;
+            b = c;
+        }*/
+
+        panic!("Incomplete");
+    }
 }
