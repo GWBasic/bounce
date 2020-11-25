@@ -1,3 +1,4 @@
+use async_std::io;
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
 use async_std::prelude::*;
@@ -73,25 +74,16 @@ async fn read_buffer<TStream>(mut stream: TStream, buffer: &mut [u8], timeout: D
 where TStream : Read + Write + Unpin {
     let mut total_bytes_read = 0;
     loop {
-        let read_future = stream.read(buffer).fuse();
-        let timeout_future = task::sleep(timeout).fuse();
+        let bytes_read = io::timeout(timeout, stream.read(buffer)).await?;
 
-        pin_mut!(read_future, timeout_future);
+        if bytes_read == 0 {
+            return Err(Error::new(ErrorKind::InvalidData, "Socket closed prematurely"));
+        }
 
-        select! {
-            read_result = read_future => {
-                let bytes_read = read_result?;
-                if bytes_read == 0 {
-                    return Err(Error::new(ErrorKind::InvalidData, "Socket closed prematurely"));
-                }
-
-                total_bytes_read = total_bytes_read + bytes_read;
-                if total_bytes_read >= buffer.len() {
-                    return Ok(());
-                }
-            },
-            _ = timeout_future => return Err(Error::new(ErrorKind::TimedOut, "timeout"))
-        }       
+        total_bytes_read = total_bytes_read + bytes_read;
+        if total_bytes_read >= buffer.len() {
+            return Ok(());
+        }
     }
 }
 
