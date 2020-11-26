@@ -10,9 +10,6 @@ use std::io::{Error, ErrorKind};
 use std::marker::Unpin;
 
 use crypto::aes;
-use futures::future::FutureExt;
-use futures::pin_mut;
-use futures::select;
 use rand::{RngCore, thread_rng};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha12Rng;

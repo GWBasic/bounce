@@ -166,18 +166,18 @@ fn parse_mode(mode: &String) -> Mode {
 
 #[cfg(test)]
 mod tests {
-    use async_std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, TcpStream, SocketAddr};
+    use async_std::net::{IpAddr, Ipv4Addr, TcpListener, TcpStream, Shutdown, SocketAddr};
     use async_std::prelude::*;
     use async_std::task;
     use async_std::task::JoinHandle;
-    use std::io::{Error, ErrorKind};
+    use std::io::Error;
 
     use crypto::aes::KeySize;
     use rand::{RngCore, thread_rng};
 
     use super::*;
 
-    async fn get_server_and_client_futures() -> (JoinHandle<Result<(), Error>>, JoinHandle<Result<(), Error>>, SocketAddr, CompletionToken, CompletionToken, TcpListener) {
+    async fn get_server_and_client_futures() -> (JoinHandle<Result<(), Error>>, JoinHandle<Result<(), Error>>, SocketAddr, CompletionToken, TcpListener) {
         let key = Key {
             key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
             size: KeySize::KeySize256
@@ -198,48 +198,17 @@ mod tests {
 
         let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone(), listening_token.clone(), cancelation_token.clone()));
 
+        listening_token.await;
+
         let listener = TcpListener::bind(socket_addr).await.unwrap();
         let client_future = task::spawn(run_client(adapter_address.to_string(), listener.local_addr().unwrap().to_string(), key.clone()));
 
-        (server_future, client_future, client_address, listening_token, cancelation_token, listener)
-
-
-        /*let key = Key {
-            key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
-            size: KeySize::KeySize256
-        };
-
-        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), 0);
-        let listener = TcpListener::bind(socket_addr).await.unwrap();
-
-        let local_addr = listener.local_addr().unwrap();
-
-        let client_future = task::spawn(run_client(local_addr.to_string(), "no destination".to_string(), key.clone()));
-
-        let server_stream = listener.incoming().next().await.unwrap().expect("Did not get incoming connection from the client");
-        drop(listener);
-
-        authenticate(key, server_stream.clone()).await.expect("Can not authenticate server stream");
-
-        (server_stream, client_future)*/
+        (server_future, client_future, client_address, cancelation_token, listener)
     }
-
-    /*
-    #[async_std::test]
-    async fn server_drops_connection() {
-
-        let (server_stream, client_future) = get_server_stream_and_client_future().await;
-
-        server_stream.shutdown(Shutdown::Both).expect("Can not shut down server stream");
-
-        let err = client_future.await.expect_err("The client should end in error");
-
-        assert_eq!(err.kind(), ErrorKind::ConnectionRefused);
-    }*/
 
     #[async_std::test]
     async fn happy_path() {
-        /*let (server_future, client_future, client_address, listening_token, cancelation_token, listener) = get_server_and_client_futures().await;
+        let (server_future, client_future, client_address, cancelation_token, listener) = get_server_and_client_futures().await;
 
         let outgoing_stream = TcpStream::connect(client_address).await.expect("Can't connect");
         let (incoming_stream, _) = listener.accept().await.expect("Incoming socket didn't come");
@@ -254,7 +223,7 @@ mod tests {
             let mut write_buf = vec!(0u8; len);
             rng.fill_bytes(&mut write_buf);
 
-            let write_future = task::spawn(a.write_all(&write_buf));
+            let write_future = task::spawn(write_all(a.clone(), write_buf.clone()));
 
             let mut read_buf = vec!(0u8; len);
 
@@ -281,8 +250,21 @@ mod tests {
             let c = a;
             a = b;
             b = c;
-        }*/
+        }
 
-        panic!("Incomplete");
+        outgoing_stream.shutdown(Shutdown::Both).expect("Can't shutdown outgoing_stream");
+        incoming_stream.shutdown(Shutdown::Both).expect("Can't shutdown incoming_stream");
+
+        cancelation_token.complete();
+
+        let err = server_future.await.expect_err("Server terminated in error");
+        assert_eq!(ErrorKind::Interrupted, err.kind(), "Unexpected error when the server exits");
+
+        let err = client_future.await.expect_err("Client terminated without error");
+        assert_eq!(ErrorKind::Interrupted, err.kind(), "Unexpected error when the client exits");
+    }
+
+    async fn write_all(mut stream: TcpStream, buf: Vec<u8>) -> Result<(), Error> {
+        stream.write_all(&buf).await
     }
 }
