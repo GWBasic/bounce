@@ -14,6 +14,8 @@ struct CompletionTokenState {
 	waker: Option<Waker>
 }
 
+// Todo: Split into Completable
+
 /// Future that allows gracefully shutting down the server
 impl CompletionToken {
 	pub fn new() -> CompletionToken {

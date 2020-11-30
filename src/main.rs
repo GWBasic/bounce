@@ -1,6 +1,7 @@
 mod auth;
 mod bridge;
 mod client;
+mod cancelation_token;
 mod completion_token;
 mod keys;
 mod server;
@@ -67,7 +68,8 @@ async fn main_env(mode: String) -> Result<(), Error> {
             let destination_host = get_env_var("BOUNCE_DESTINATION_HOST")?;
             let key = get_key_from_env("BOUNCE_KEY")?;
 
-            run_client(bounce_server, destination_host, key).await?;
+            let (client_future, _) = run_client(bounce_server, destination_host, key);
+            client_future.await?;
         },
         Mode::Keys => {
             generate_keys();
@@ -108,7 +110,8 @@ async fn main_args() -> Result<(), Error> {
             let destination_host = args[3].clone();
             let key = parse_key(&args[4]);
         
-            run_client(bounce_server, destination_host, key).await?;
+            let (client_future, _) = run_client(bounce_server, destination_host, key);
+            client_future.await?;
         },
         Mode::Keys => {
             if args.len() != 2 {
@@ -175,9 +178,11 @@ mod tests {
     use crypto::aes::KeySize;
     use rand::{RngCore, thread_rng};
 
+    use crate::cancelation_token::CancelationToken;
+
     use super::*;
 
-    async fn get_server_and_client_futures() -> (JoinHandle<Result<(), Error>>, JoinHandle<Result<(), Error>>, SocketAddr, CompletionToken, TcpListener) {
+    async fn get_server_and_client_futures() -> (JoinHandle<Result<(), Error>>, JoinHandle<Result<(), Error>>, SocketAddr, CompletionToken, TcpListener, CancelationToken) {
         let key = Key {
             key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
             size: KeySize::KeySize256
@@ -194,21 +199,21 @@ mod tests {
         drop(adapter_listener);
 
         let listening_token = CompletionToken::new();
-        let cancelation_token = CompletionToken::new();
+        let server_completion_token = CompletionToken::new();
 
-        let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone(), listening_token.clone(), cancelation_token.clone()));
+        let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone(), listening_token.clone(), server_completion_token.clone()));
 
         listening_token.await;
 
         let listener = TcpListener::bind(socket_addr).await.unwrap();
-        let client_future = task::spawn(run_client(adapter_address.to_string(), listener.local_addr().unwrap().to_string(), key.clone()));
+        let (client_future, client_cancelation_token) = run_client(adapter_address.to_string(), listener.local_addr().unwrap().to_string(), key.clone());
 
-        (server_future, client_future, client_address, cancelation_token, listener)
+        (server_future, client_future, client_address, server_completion_token, listener, client_cancelation_token)
     }
 
     #[async_std::test]
     async fn happy_path() {
-        let (server_future, client_future, client_address, cancelation_token, listener) = get_server_and_client_futures().await;
+        let (server_future, client_future, client_address, server_completion_token, listener, client_cancelation_token) = get_server_and_client_futures().await;
 
         let outgoing_stream = TcpStream::connect(client_address).await.expect("Can't connect");
         let (incoming_stream, _) = listener.accept().await.expect("Incoming socket didn't come");
@@ -255,11 +260,12 @@ mod tests {
         outgoing_stream.shutdown(Shutdown::Both).expect("Can't shutdown outgoing_stream");
         incoming_stream.shutdown(Shutdown::Both).expect("Can't shutdown incoming_stream");
 
-        cancelation_token.complete();
+        server_completion_token.complete();
 
         let err = server_future.await.expect_err("Server terminated in error");
         assert_eq!(ErrorKind::Interrupted, err.kind(), "Unexpected error when the server exits");
 
+        client_cancelation_token.cancel();
         let err = client_future.await.expect_err("Client terminated without error");
         assert_eq!(ErrorKind::Interrupted, err.kind(), "Unexpected error when the client exits");
     }
