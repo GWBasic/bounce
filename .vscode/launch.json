@@ -46,7 +46,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["happy_path"],
+            "args": [], //"happy_path"],
             "cwd": "${workspaceFolder}",
             "env": {
                 "RUST_BACKTRACE": "1"
