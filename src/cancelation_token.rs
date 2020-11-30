@@ -44,6 +44,7 @@ impl CancelationToken {
 	}
 
 	/// Call to shut down the server
+	#[allow(dead_code)]
 	pub fn cancel(&self) {
 		let mut shared_state = self.shared_state.lock().unwrap();
 
