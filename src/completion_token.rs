@@ -9,22 +9,37 @@ pub struct CompletionToken {
 }
 
 #[derive(Debug)]
+pub struct Completable {
+	shared_state: Arc<Mutex<CompletionTokenState>>
+}
+
+#[derive(Debug)]
 struct CompletionTokenState {
 	canceled: bool,
 	waker: Option<Waker>
 }
 
+// Todo: Split into Completable
+
 /// Future that allows gracefully shutting down the server
 impl CompletionToken {
-	pub fn new() -> CompletionToken {
-		CompletionToken {
-			shared_state: Arc::new(Mutex::new(CompletionTokenState {
-				canceled: false,
-				waker: None
-			}))
-		}
-	}
+	pub fn new() -> (CompletionToken, Completable) {
+		let shared_state = Arc::new(Mutex::new(CompletionTokenState {
+			canceled: false,
+			waker: None
+		}));
 
+		let completion_token = CompletionToken {
+			shared_state: shared_state.clone()
+		};
+
+		let completable = Completable { shared_state };
+
+		(completion_token, completable)
+	}
+}
+
+impl Completable {
 	/// Call to shut down the server
 	pub fn complete(&self) {
 		let mut shared_state = self.shared_state.lock().unwrap();

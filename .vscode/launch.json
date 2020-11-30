@@ -46,7 +46,7 @@
                     "kind": "bin"
                 }
             },
-            "args": [], //"server_sends_incorrect_token"],
+            "args": [], //"happy_path"],
             "cwd": "${workspaceFolder}",
             "env": {
                 "RUST_BACKTRACE": "1"

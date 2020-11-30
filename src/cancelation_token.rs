@@ -1,8 +1,4 @@
-// I can't get code that uses this to compile
-
-/*
 use std::future::Future;
-use std::io::Error;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
@@ -15,30 +11,40 @@ pub struct CancelationToken {
 }
 
 #[derive(Debug)]
-struct CancelationTokenFuture {
+pub struct Cancelable {
+	shared_state: Arc<Mutex<CancelationTokenState>>
+}
+
+#[derive(Debug)]
+pub struct CancelationTokenFuture {
 	shared_state: Arc<Mutex<CancelationTokenState>>
 }
 
 #[derive(Debug)]
 struct CancelationTokenState {
 	canceled: bool,
-	waker: Option<Waker>,
-	error: Option<Error>
+	waker: Option<Waker>
 }
 
 /// Future that allows gracefully shutting down the server
 impl CancelationToken {
-	pub fn new(error: Error) -> CancelationToken {
-		CancelationToken {
-			shared_state: Arc::new(Mutex::new(CancelationTokenState {
-				canceled: false,
-				waker: None,
-				error: Some(error)
-			}))
-		}
+	pub fn new() -> (CancelationToken, Cancelable) {
+		let shared_state = Arc::new(Mutex::new(CancelationTokenState {
+			canceled: false,
+			waker: None
+		}));
+
+		let cancelation_token = CancelationToken {
+			shared_state: shared_state.clone()
+		};
+		
+		let cancelable = Cancelable { shared_state };
+
+		(cancelation_token, cancelable)
 	}
 
 	/// Call to shut down the server
+	#[allow(dead_code)]
 	pub fn cancel(&self) {
 		let mut shared_state = self.shared_state.lock().unwrap();
 
@@ -47,13 +53,15 @@ impl CancelationToken {
 			waker.wake()
 		}
 	}
+}
 
-	pub async fn allow_cancel<T, TFuture>(&self, future: TFuture) -> async_std::io::Result<T> where
-	TFuture: Future<Output = async_std::io::Result<T>> + Unpin {
+impl Cancelable {
+	pub async fn allow_cancel<TFuture, T>(&self, future: TFuture, canceled_result: T) -> T where
+	TFuture: Future<Output = T> + Unpin {
 		{
 			let shared_state = self.shared_state.lock().unwrap();
 			if shared_state.canceled {
-				panic!("Already canceled");
+				return canceled_result;
 			}
 		}
 
@@ -62,11 +70,14 @@ impl CancelationToken {
 		};
 
 		match select(future, cancelation_token_future).await {
-			Either::Left((r, _)) => r,
-			Either::Right(_) => {
-				let mut shared_state = self.shared_state.lock().unwrap();
-				Err(shared_state.error.take().unwrap())
-			}
+			Either::Left((l, _)) => l,
+			Either::Right(_) => canceled_result
+		}
+	}
+
+	pub fn future(&self) -> CancelationTokenFuture {
+		CancelationTokenFuture {
+			shared_state: self.shared_state.clone()
 		}
 	}
 }
@@ -93,4 +104,11 @@ impl Clone for CancelationToken {
 		}
 	}
 }
-*/
+
+impl Clone for Cancelable {
+	fn clone(&self) -> Self {
+		Cancelable {
+			shared_state: self.shared_state.clone()
+		}
+	}
+}

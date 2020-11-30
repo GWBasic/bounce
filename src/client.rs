@@ -1,12 +1,22 @@
 use async_std::net::{Shutdown, TcpStream};
 use async_std::prelude::*;
-use std::io::Error;
+use async_std::task;
+use async_std::task::JoinHandle;
+use std::io::{ Error, ErrorKind };
 
 use crate::auth::authenticate;
 use crate::bridge::run_bridge;
+use crate::cancelation_token::{ CancelationToken, Cancelable };
 use crate::keys::Key;
 
-pub async fn run_client(bounce_server: String, destination_host: String, key: Key) -> Result<(), Error> {
+pub fn run_client(bounce_server: String, destination_host: String, key: Key) -> (JoinHandle<Result<(), Error>>, CancelationToken) {
+    let (cancelation_token, cancelable) = CancelationToken::new();
+    let client_future = task::spawn(run_client_int(bounce_server, destination_host, key, cancelable));
+
+    (client_future, cancelation_token)
+}
+
+async fn run_client_int(bounce_server: String, destination_host: String, key: Key, cancelable: Cancelable) -> Result<(), Error> {
     log::info!("Bounce client: Connecting to bounce server at {}, bouncing to {}", bounce_server, destination_host);
 
     let connected = b"connected".to_vec();
@@ -20,7 +30,10 @@ pub async fn run_client(bounce_server: String, destination_host: String, key: Ke
         let mut read = 0;
 
         'read_loop: loop {
-            let r = bounce_stream.read(&mut buf[read..]).await?;
+            let read_future = bounce_stream.read(&mut buf[read..]);
+            let r = cancelable.allow_cancel(
+                read_future,
+                Err(Error::new(ErrorKind::Interrupted, "Canceled"))).await?;
 
             if r == 0 {
                 log::error!("Connection to bounce server {} ended", bounce_server);
@@ -63,7 +76,6 @@ pub async fn run_client(bounce_server: String, destination_host: String, key: Ke
 mod tests {
     use async_std::net::{IpAddr, Ipv4Addr, Shutdown, TcpListener, SocketAddr};
     use async_std::prelude::*;
-    use async_std::task;
     use async_std::task::JoinHandle;
     use std::io::{Error, ErrorKind};
 
@@ -82,7 +94,7 @@ mod tests {
 
         let local_addr = listener.local_addr().unwrap();
 
-        let client_future = task::spawn(run_client(local_addr.to_string(), "no destination".to_string(), key.clone()));
+        let (client_future, _) = run_client(local_addr.to_string(), "no destination".to_string(), key.clone());
 
         let server_stream = listener.incoming().next().await.unwrap().expect("Did not get incoming connection from the client");
         drop(listener);
