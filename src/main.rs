@@ -56,8 +56,8 @@ async fn main_env(mode: String) -> Result<(), Error> {
 
     match parse_mode(&mode) {
         Mode::Server => {
-            let port = get_port_from_env("BOUNCE_PORT")?;
-            let adapter_port = get_port_from_env("BOUNCE_ADAPTER_PORT")?;
+            let port = get_port_from_env("BOUNCE_PORT", Some("PORT"))?;
+            let adapter_port = get_port_from_env("BOUNCE_ADAPTER_PORT", None)?;
             let key = get_key_from_env("BOUNCE_KEY")?;
         
             let (server_future, _, _) = run_server(port, adapter_port, key);
@@ -133,8 +133,14 @@ fn get_env_var(var_name: &str) -> Result<String, Error> {
     }
 }
 
-fn get_port_from_env(var_name: &str) -> Result<u16, Error> {
-    let port_str = get_env_var(var_name)?;
+fn get_port_from_env(var_name: &str, second_var_name: Option<&str>) -> Result<u16, Error> {
+    let port_str = match get_env_var(var_name) {
+        Ok(p) => p,
+        Err(e) => match second_var_name {
+            Some(v) => get_env_var(v)?,
+            None => return Err(e)
+        }
+    };
     Ok(parse_port(&port_str)?)
 }
 
