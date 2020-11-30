@@ -15,7 +15,6 @@ use env_logger::Builder;
 use log::LevelFilter;
 
 use client::run_client;
-use completion_token::CompletionToken;
 use keys::{Key, generate_keys, parse_key};
 use server::run_server;
 
@@ -61,7 +60,8 @@ async fn main_env(mode: String) -> Result<(), Error> {
             let adapter_port = get_port_from_env("BOUNCE_ADAPTER_PORT")?;
             let key = get_key_from_env("BOUNCE_KEY")?;
         
-            run_server(port, adapter_port, key, CompletionToken::new(), CompletionToken::new()).await?;
+            let (server_future, _, _) = run_server(port, adapter_port, key);
+            server_future.await?;
         },
         Mode::Client => {
             let bounce_server = get_env_var("BOUNCE_SERVER")?;
@@ -98,7 +98,8 @@ async fn main_args() -> Result<(), Error> {
             let adapter_port = parse_port(&args[3]).unwrap();
             let key = parse_key(&args[4]);
         
-            run_server(port, adapter_port, key, CompletionToken::new(), CompletionToken::new()).await?;
+            let (server_future, _, _) = run_server(port, adapter_port, key);
+            server_future.await?;
         },
         Mode::Client => {
 
@@ -182,7 +183,7 @@ mod tests {
 
     use super::*;
 
-    async fn get_server_and_client_futures() -> (JoinHandle<Result<(), Error>>, JoinHandle<Result<(), Error>>, SocketAddr, CompletionToken, TcpListener, CancelationToken) {
+    async fn get_server_and_client_futures() -> (JoinHandle<Result<(), Error>>, JoinHandle<Result<(), Error>>, SocketAddr, CancelationToken, TcpListener, CancelationToken) {
         let key = Key {
             key: vec![1 as u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
             size: KeySize::KeySize256
@@ -198,22 +199,19 @@ mod tests {
         drop(client_listener);
         drop(adapter_listener);
 
-        let listening_token = CompletionToken::new();
-        let server_completion_token = CompletionToken::new();
-
-        let server_future = task::spawn(run_server(client_address.port(), adapter_address.port(), key.clone(), listening_token.clone(), server_completion_token.clone()));
+        let (server_future, listening_token, server_cancelation_token) = run_server(client_address.port(), adapter_address.port(), key.clone());
 
         listening_token.await;
 
         let listener = TcpListener::bind(socket_addr).await.unwrap();
         let (client_future, client_cancelation_token) = run_client(adapter_address.to_string(), listener.local_addr().unwrap().to_string(), key.clone());
 
-        (server_future, client_future, client_address, server_completion_token, listener, client_cancelation_token)
+        (server_future, client_future, client_address, server_cancelation_token, listener, client_cancelation_token)
     }
 
     #[async_std::test]
     async fn happy_path() {
-        let (server_future, client_future, client_address, server_completion_token, listener, client_cancelation_token) = get_server_and_client_futures().await;
+        let (server_future, client_future, client_address, server_cancelation_token, listener, client_cancelation_token) = get_server_and_client_futures().await;
 
         let outgoing_stream = TcpStream::connect(client_address).await.expect("Can't connect");
         let (incoming_stream, _) = listener.accept().await.expect("Incoming socket didn't come");
@@ -260,7 +258,7 @@ mod tests {
         outgoing_stream.shutdown(Shutdown::Both).expect("Can't shutdown outgoing_stream");
         incoming_stream.shutdown(Shutdown::Both).expect("Can't shutdown incoming_stream");
 
-        server_completion_token.complete();
+        server_cancelation_token.cancel();
 
         let err = server_future.await.expect_err("Server terminated in error");
         assert_eq!(ErrorKind::Interrupted, err.kind(), "Unexpected error when the server exits");

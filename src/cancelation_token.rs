@@ -16,7 +16,7 @@ pub struct Cancelable {
 }
 
 #[derive(Debug)]
-struct CancelationTokenFuture {
+pub struct CancelationTokenFuture {
 	shared_state: Arc<Mutex<CancelationTokenState>>
 }
 
@@ -71,6 +71,12 @@ impl Cancelable {
 		match select(future, cancelation_token_future).await {
 			Either::Left((l, _)) => l,
 			Either::Right(_) => canceled_result
+		}
+	}
+
+	pub fn future(&self) -> CancelationTokenFuture {
+		CancelationTokenFuture {
+			shared_state: self.shared_state.clone()
 		}
 	}
 }
