@@ -19,7 +19,11 @@
                     "kind": "bin"
                 }
             },
-            "args": ["client", "localhost:3457", "localhost:3000", "0BiYfI/YlqXfGvFrJo2pcf7ddFDPU9CXU0SPcoMJkSE="],
+            "args": [
+                "client",
+                "vca-bounce.herokuapp.com:3457", //"localhost:3457",
+                "localhost:3000",
+                "y8XzVzN8vnJYSofnEmLlxL9ymC0c8QsJ2CJ3eV6We7Q="], //"0BiYfI/YlqXfGvFrJo2pcf7ddFDPU9CXU0SPcoMJkSE="],
             "cwd": "${workspaceFolder}",
             "env": {
                 /*"BOUNCE_MODE": "client",

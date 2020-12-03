@@ -3,10 +3,10 @@ use async_std::prelude::*;
 use async_std::task;
 use async_std::task::JoinHandle;
 use std::io::{ Error, ErrorKind };
+use sync_tokens::cancelation_token::{ CancelationToken, Cancelable };
 
 use crate::auth::authenticate;
 use crate::bridge::run_bridge;
-use crate::cancelation_token::{ CancelationToken, Cancelable };
 use crate::keys::Key;
 
 pub fn run_client(bounce_server: String, destination_host: String, key: Key) -> (JoinHandle<Result<(), Error>>, CancelationToken) {

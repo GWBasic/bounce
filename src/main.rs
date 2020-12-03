@@ -1,8 +1,6 @@
 mod auth;
 mod bridge;
 mod client;
-mod cancelation_token;
-mod completion_token;
 mod keys;
 mod server;
 mod xor;
@@ -178,8 +176,7 @@ mod tests {
 
     use crypto::aes::KeySize;
     use rand::{RngCore, thread_rng};
-
-    use crate::cancelation_token::CancelationToken;
+    use sync_tokens::cancelation_token::CancelationToken;
 
     use super::*;
 

@@ -3,16 +3,16 @@ use async_std::prelude::*;
 use async_std::task;
 use async_std::task::JoinHandle;
 use std::io::{ Error, ErrorKind };
+use sync_tokens::cancelation_token::{ CancelationToken, Cancelable };
+use sync_tokens::completion_token::{ CompletionToken, Completable };
 
 use futures::future::{Either, select};
 
 use crate::auth::authenticate;
 use crate::bridge::run_bridge;
-use crate::cancelation_token::{ CancelationToken, Cancelable };
-use crate::completion_token::{ CompletionToken, Completable };
 use crate::keys::Key;
 
-pub fn run_server(port: u16, adapter_port: u16, key: Key) -> (JoinHandle<Result<(), Error>>, CompletionToken, CancelationToken) {
+pub fn run_server(port: u16, adapter_port: u16, key: Key) -> (JoinHandle<Result<(), Error>>, CompletionToken<()>, CancelationToken) {
     let (listening_token, listening_completable) = CompletionToken::new();
     let (cancelation_token, cancelable) = CancelationToken::new();
 
@@ -21,7 +21,7 @@ pub fn run_server(port: u16, adapter_port: u16, key: Key) -> (JoinHandle<Result<
     (server_future, listening_token, cancelation_token)
 }
 
-async fn run_server_int(port: u16, adapter_port: u16, key: Key, listening_completable: Completable, cancelable: Cancelable) -> Result<(), Error> {
+async fn run_server_int(port: u16, adapter_port: u16, key: Key, listening_completable: Completable<()>, cancelable: Cancelable) -> Result<(), Error> {
 
     let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
     let listener = TcpListener::bind(socket_addr).await?;
@@ -36,7 +36,7 @@ async fn run_server_int(port: u16, adapter_port: u16, key: Key, listening_comple
     // This is the ongoing task to wait for adapter sockets
     let mut incoming_adapter_future = task::spawn(accept(adapter_listener));
 
-    listening_completable.complete();
+    listening_completable.complete(());
 
     log::info!("Bounce server: Listening for incoming connections on {}, accepting adapter on port {}", port, adapter_port);
     
